@@ -222,9 +222,12 @@ jobs:
         fi
         
         # 将材料分析文件添加到发布包
-        if [ -f "summary/new_ships_materials.txt" ]; then
+        if [ -f "summary/new_ships_materials.txt" ] && [ -s "summary/new_ships_materials.txt" ]; then
           cp summary/new_ships_materials.txt .
           echo "新飞船材料分析已准备就绪"
+        else
+          echo "本次更新未发现新飞船" > new_ships_materials.txt
+          echo "创建了空的材料分析文件"
         fi
 
     - name: Create tarballs

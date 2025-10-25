@@ -20,17 +20,20 @@ def load_jsonl(filename):
     return data
 
 def load_delta_files(delta_dir):
-    """加载所有 delta 文件，提取新增的 types"""
+    """加载 types.delta.jsonl 文件，提取新增的 types"""
     added_types = {}
     
-    for delta_file in glob.glob(f"{delta_dir}/*.delta.jsonl"):
-        print(f"处理 delta 文件: {delta_file}")
-        with open(delta_file, "r", encoding="utf-8") as f:
+    types_delta_file = f"{delta_dir}/types.delta.jsonl"
+    if os.path.exists(types_delta_file):
+        print(f"处理 types delta 文件: {types_delta_file}")
+        with open(types_delta_file, "r", encoding="utf-8") as f:
             for line in f:
                 if line.strip():
                     record = json.loads(line)
                     if record.get("action") == "added":
                         added_types[record["id"]] = record["data"]
+    else:
+        print(f"未找到 types delta 文件: {types_delta_file}")
     
     return added_types
 
@@ -202,8 +205,8 @@ def main():
     sisi_blueprints_data = load_jsonl("sisi-jsonl/blueprints.jsonl")
     print(f"加载了 {len(sisi_blueprints_data)} 个 SISI blueprints")
     
-    # 加载 delta 文件
-    print("加载 delta 文件...")
+    # 加载 types delta 文件
+    print("加载 types delta 文件...")
     added_types = load_delta_files("delta")
     print(f"找到 {len(added_types)} 个新增的 types")
     
@@ -269,14 +272,17 @@ def main():
     
     # 创建简化的新飞船材料报告
     with open("summary/new_ships_materials.txt", "w", encoding="utf-8") as f:
-        for ship_info in blueprint_analysis:
-            f.write(f"新增飞船：{ship_info['ship_name']}\n")
-            if ship_info['status'] == "未找到蓝图":
-                f.write("- 未找到蓝图\n")
-            else:
-                for material in ship_info['materials']:
-                    f.write(f"- {material['name']}（{material['quantity']}数量）\n")
-            f.write("\n")
+        if not blueprint_analysis:
+            f.write("本次更新未发现新飞船\n")
+        else:
+            for ship_info in blueprint_analysis:
+                f.write(f"新增飞船：{ship_info['ship_name']}\n")
+                if ship_info['status'] == "未找到蓝图":
+                    f.write("- 未找到蓝图\n")
+                else:
+                    for material in ship_info['materials']:
+                        f.write(f"- {material['name']}（{material['quantity']}数量）\n")
+                f.write("\n")
     
     print(f"\n=== 汇总完成 ===")
     print(f"新增 Types 总数: {len(added_types)}")
