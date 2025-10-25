@@ -203,26 +203,6 @@ jobs:
         git tag sde-comparison-tq-${{ needs.build-numbers.outputs.tq-build-number }}-sisi-${{ needs.build-numbers.outputs.sisi-build-number }}
         git push origin sde-comparison-tq-${{ needs.build-numbers.outputs.tq-build-number }}-sisi-${{ needs.build-numbers.outputs.sisi-build-number }}
 
-    - name: Create tarballs
-      if: steps.sisi-tq-delta.outputs.has-delta == 'true'
-      run: |
-        TQ_BUILD_NUMBER=$(cat tq-build-number.txt)
-        SISI_BUILD_NUMBER=$(cat sisi-build-number.txt)
-
-        mkdir -p package/tq package/sisi package/delta
-
-        # Package TQ SDE
-        mv tq-jsonl package/tq/sde
-        (cd package/tq && tar Jcf ../../sde-tq-${TQ_BUILD_NUMBER}.tar.xz sde)
-
-        # Package SISI SDE
-        mv sisi-jsonl package/sisi/sde
-        (cd package/sisi && tar Jcf ../../sde-sisi-${SISI_BUILD_NUMBER}.tar.xz sde)
-
-        # Package delta (SISI vs TQ differences)
-        mv sisi-vs-tq-delta package/delta/sisi-vs-tq
-        (cd package/delta && tar Jcf ../../sisi-vs-tq-delta.tar.xz sisi-vs-tq)
-
     - name: Create summary analysis
       if: steps.sisi-tq-delta.outputs.has-delta == 'true'
       run: |
@@ -247,6 +227,26 @@ jobs:
           cp summary/new_ships_materials.txt .
           echo "新飞船材料分析已准备就绪"
         fi
+
+    - name: Create tarballs
+      if: steps.sisi-tq-delta.outputs.has-delta == 'true'
+      run: |
+        TQ_BUILD_NUMBER=$(cat tq-build-number.txt)
+        SISI_BUILD_NUMBER=$(cat sisi-build-number.txt)
+
+        mkdir -p package/tq package/sisi package/delta
+
+        # Package TQ SDE
+        mv tq-jsonl package/tq/sde
+        (cd package/tq && tar Jcf ../../sde-tq-${TQ_BUILD_NUMBER}.tar.xz sde)
+
+        # Package SISI SDE
+        mv sisi-jsonl package/sisi/sde
+        (cd package/sisi && tar Jcf ../../sde-sisi-${SISI_BUILD_NUMBER}.tar.xz sde)
+
+        # Package delta (SISI vs TQ differences)
+        mv sisi-vs-tq-delta package/delta/sisi-vs-tq
+        (cd package/delta && tar Jcf ../../sisi-vs-tq-delta.tar.xz sisi-vs-tq)
 
     - name: Create release body
       if: steps.sisi-tq-delta.outputs.has-delta == 'true'
