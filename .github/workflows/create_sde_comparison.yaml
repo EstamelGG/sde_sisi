@@ -180,6 +180,12 @@ jobs:
       run: |
         # Use TQ as the base (left) and SISI as the comparison (right)
         # This will show what SISI has that TQ doesn't have
+        
+        # Copy SISI yaml to current yaml directory for comparison
+        cp -r sisi-yaml yaml
+        cp sisi-build-number.txt yaml/build-number.txt
+        
+        # Create delta using TQ as base
         python scripts/create_delta.py tq-yaml
         mv delta sisi-vs-tq-delta
 
