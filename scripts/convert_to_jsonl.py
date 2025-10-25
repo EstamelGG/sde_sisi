@@ -103,7 +103,7 @@ def convert_object(json_value, columns, options, strings):
         elif "columns" in column:
             value = convert_object(value, column["columns"], options, strings)
         else:
-            value = convert_value(v, column, options, strings)
+            value = convert_value(value, column, options, strings)
 
         if value is None:
             continue
