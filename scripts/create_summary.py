@@ -1,0 +1,288 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+汇总工具：分析新增的 types 并筛选出新的飞船
+"""
+import json
+import os
+import glob
+from collections import defaultdict
+
+def load_jsonl(filename):
+    """加载 JSONL 文件并返回字典"""
+    data = {}
+    if os.path.exists(filename):
+        with open(filename, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    record = json.loads(line)
+                    data[record["id"]] = record["data"]
+    return data
+
+def load_delta_files(delta_dir):
+    """加载所有 delta 文件，提取新增的 types"""
+    added_types = {}
+    
+    for delta_file in glob.glob(f"{delta_dir}/*.delta.jsonl"):
+        print(f"处理 delta 文件: {delta_file}")
+        with open(delta_file, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    record = json.loads(line)
+                    if record.get("action") == "added":
+                        added_types[record["id"]] = record["data"]
+    
+    return added_types
+
+def create_group_to_category_mapping(groups_data):
+    """创建 groupID 到 categoryID 的映射表"""
+    group_to_category = {}
+    for group_id, group_data in groups_data.items():
+        if "categoryID" in group_data:
+            group_to_category[group_id] = group_data["categoryID"]
+    return group_to_category
+
+def analyze_new_types(added_types, groups_data, tq_types_data):
+    """分析新增的 types，找出属于飞船类别的"""
+    print("创建 groupID 到 categoryID 的映射...")
+    group_to_category = create_group_to_category_mapping(groups_data)
+    
+    # 统计 categoryID 分布
+    category_stats = defaultdict(int)
+    new_ships = {}
+    
+    print(f"分析 {len(added_types)} 个新增的 types...")
+    
+    for type_id, type_data in added_types.items():
+        if "groupID" in type_data:
+            group_id = type_data["groupID"]
+            if group_id in group_to_category:
+                category_id = group_to_category[group_id]
+                category_stats[category_id] += 1
+                
+                # 如果是飞船类别 (categoryID == 6)
+                if category_id == 6:
+                    new_ships[type_id] = type_data
+                    print(f"发现新飞船: TypeID {type_id}, GroupID {group_id}")
+    
+    return new_ships, category_stats
+
+def create_summary_report(new_ships, category_stats):
+    """创建汇总报告"""
+    report = {
+        "summary": {
+            "total_new_types": len(new_ships),
+            "category_distribution": dict(category_stats),
+            "new_ships_count": len(new_ships)
+        },
+        "new_ships": new_ships
+    }
+    
+    return report
+
+def find_blueprints_for_ships(new_ships, sisi_blueprints_data, sisi_types_data):
+    """为新飞船查找相关蓝图"""
+    ship_blueprints = {}
+    
+    for ship_id, ship_data in new_ships.items():
+        print(f"查找飞船 {ship_id} 的蓝图...")
+        
+        # 在蓝图中查找制造该飞船的蓝图
+        blueprint_found = False
+        for blueprint_id, blueprint_data in sisi_blueprints_data.items():
+            if "activities" in blueprint_data and "manufacturing" in blueprint_data["activities"]:
+                manufacturing = blueprint_data["activities"]["manufacturing"]
+                if "products" in manufacturing:
+                    for product in manufacturing["products"]:
+                        if product.get("typeID") == ship_id:
+                            # 找到制造该飞船的蓝图
+                            blueprint_found = True
+                            ship_blueprints[ship_id] = {
+                                "blueprint_id": blueprint_id,
+                                "blueprint_data": blueprint_data,
+                                "materials": manufacturing.get("materials", [])
+                            }
+                            print(f"  找到蓝图: {blueprint_id}")
+                            break
+            if blueprint_found:
+                break
+        
+        if not blueprint_found:
+            ship_blueprints[ship_id] = {
+                "blueprint_id": None,
+                "blueprint_data": None,
+                "materials": [],
+                "status": "未找到蓝图"
+            }
+            print(f"  未找到蓝图")
+    
+    return ship_blueprints
+
+def get_material_names(materials, types_data):
+    """获取材料名称"""
+    material_info = []
+    
+    for material in materials:
+        type_id = material.get("typeID")
+        quantity = material.get("quantity", 0)
+        
+        if type_id in types_data:
+            type_data = types_data[type_id]
+            name_data = type_data.get("name", {})
+            
+            # 优先使用中文名称，没有则使用英文
+            name = name_data.get("zh") or name_data.get("en", f"TypeID {type_id}")
+        else:
+            name = f"TypeID {type_id}"
+        
+        material_info.append({
+            "name": name,
+            "quantity": quantity,
+            "typeID": type_id
+        })
+    
+    return material_info
+
+def create_blueprint_analysis(new_ships, ship_blueprints, types_data):
+    """创建蓝图分析报告"""
+    analysis = []
+    
+    for ship_id, ship_data in new_ships.items():
+        ship_name_data = ship_data.get("name", {})
+        ship_name = ship_name_data.get("zh") or ship_name_data.get("en", f"TypeID {ship_id}")
+        
+        ship_info = {
+            "ship_id": ship_id,
+            "ship_name": ship_name,
+            "blueprint_info": ship_blueprints.get(ship_id, {})
+        }
+        
+        if ship_blueprints.get(ship_id, {}).get("status") == "未找到蓝图":
+            ship_info["materials"] = []
+            ship_info["status"] = "未找到蓝图"
+        else:
+            materials = ship_blueprints[ship_id].get("materials", [])
+            ship_info["materials"] = get_material_names(materials, types_data)
+            ship_info["status"] = "找到蓝图"
+        
+        analysis.append(ship_info)
+    
+    return analysis
+
+def main():
+    print("=== SDE 汇总工具 ===")
+    
+    # 检查必要的文件
+    required_files = [
+        "delta",
+        "tq-jsonl/groups.jsonl",
+        "tq-jsonl/types.jsonl"
+    ]
+    
+    for file_path in required_files:
+        if not os.path.exists(file_path):
+            print(f"错误: 找不到必要文件 {file_path}")
+            return
+    
+    # 加载数据
+    print("加载 groups 数据...")
+    groups_data = load_jsonl("tq-jsonl/groups.jsonl")
+    print(f"加载了 {len(groups_data)} 个 groups")
+    
+    print("加载 TQ types 数据...")
+    tq_types_data = load_jsonl("tq-jsonl/types.jsonl")
+    print(f"加载了 {len(tq_types_data)} 个 types")
+    
+    # 加载 SISI 数据用于蓝图分析
+    print("加载 SISI types 数据...")
+    sisi_types_data = load_jsonl("sisi-jsonl/types.jsonl")
+    print(f"加载了 {len(sisi_types_data)} 个 SISI types")
+    
+    print("加载 SISI blueprints 数据...")
+    sisi_blueprints_data = load_jsonl("sisi-jsonl/blueprints.jsonl")
+    print(f"加载了 {len(sisi_blueprints_data)} 个 SISI blueprints")
+    
+    # 加载 delta 文件
+    print("加载 delta 文件...")
+    added_types = load_delta_files("delta")
+    print(f"找到 {len(added_types)} 个新增的 types")
+    
+    if not added_types:
+        print("没有找到新增的 types，跳过分析")
+        return
+    
+    # 分析新增的 types
+    new_ships, category_stats = analyze_new_types(added_types, groups_data, tq_types_data)
+    
+    # 查找新飞船的蓝图
+    print("\n=== 蓝图分析 ===")
+    ship_blueprints = find_blueprints_for_ships(new_ships, sisi_blueprints_data, sisi_types_data)
+    
+    # 创建蓝图分析
+    blueprint_analysis = create_blueprint_analysis(new_ships, ship_blueprints, sisi_types_data)
+    
+    # 创建汇总报告
+    report = create_summary_report(new_ships, category_stats)
+    report["blueprint_analysis"] = blueprint_analysis
+    
+    # 保存新飞船数据
+    os.makedirs("summary", exist_ok=True)
+    with open("summary/new_ships.json", "w", encoding="utf-8") as f:
+        json.dump(new_ships, f, ensure_ascii=False, indent=2)
+    
+    # 保存蓝图分析
+    with open("summary/blueprint_analysis.json", "w", encoding="utf-8") as f:
+        json.dump(blueprint_analysis, f, ensure_ascii=False, indent=2)
+    
+    # 保存完整报告
+    with open("summary/summary_report.json", "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
+    
+    # 创建 Markdown 报告
+    with open("summary/summary_report.md", "w", encoding="utf-8") as f:
+        f.write("# SDE 变更汇总报告\n\n")
+        f.write(f"## 新增 Types 统计\n")
+        f.write(f"- 总新增 Types: {len(added_types)}\n")
+        f.write(f"- 新增飞船数量: {len(new_ships)}\n\n")
+        
+        f.write("## 类别分布\n")
+        for category_id, count in sorted(category_stats.items()):
+            f.write(f"- CategoryID {category_id}: {count} 个\n")
+        
+        if new_ships:
+            f.write("\n## 新增飞船列表\n")
+            for type_id, type_data in new_ships.items():
+                group_id = type_data.get("groupID", "未知")
+                name = type_data.get("name", {}).get("en", f"TypeID {type_id}")
+                f.write(f"- {name} (TypeID: {type_id}, GroupID: {group_id})\n")
+        
+        # 添加蓝图分析
+        f.write("\n## 新飞船蓝图分析\n")
+        for ship_info in blueprint_analysis:
+            f.write(f"\n### {ship_info['ship_name']}\n")
+            if ship_info['status'] == "未找到蓝图":
+                f.write("- 未找到蓝图\n")
+            else:
+                f.write("制造材料:\n")
+                for material in ship_info['materials']:
+                    f.write(f"- {material['name']} ({material['quantity']} 数量)\n")
+    
+    # 创建简化的新飞船材料报告
+    with open("summary/new_ships_materials.txt", "w", encoding="utf-8") as f:
+        for ship_info in blueprint_analysis:
+            f.write(f"新增飞船：{ship_info['ship_name']}\n")
+            if ship_info['status'] == "未找到蓝图":
+                f.write("- 未找到蓝图\n")
+            else:
+                for material in ship_info['materials']:
+                    f.write(f"- {material['name']}（{material['quantity']}数量）\n")
+            f.write("\n")
+    
+    print(f"\n=== 汇总完成 ===")
+    print(f"新增 Types 总数: {len(added_types)}")
+    print(f"新增飞船数量: {len(new_ships)}")
+    print(f"类别分布: {dict(category_stats)}")
+    print(f"报告已保存到 summary/ 目录")
+
+if __name__ == "__main__":
+    main()

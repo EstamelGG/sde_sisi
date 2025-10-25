@@ -223,6 +223,31 @@ jobs:
         mv sisi-vs-tq-delta package/delta/sisi-vs-tq
         (cd package/delta && tar Jcf ../../sisi-vs-tq-delta.tar.xz sisi-vs-tq)
 
+    - name: Create summary analysis
+      if: steps.sisi-tq-delta.outputs.has-delta == 'true'
+      run: |
+        # 准备汇总工具所需的数据
+        cp -r tq-jsonl tq-jsonl
+        cp -r sisi-jsonl sisi-jsonl
+        cp -r sisi-vs-tq-delta delta
+        
+        # 运行汇总工具
+        python scripts/create_summary.py
+        
+        # 将新飞船文件添加到发布包
+        if [ -f "summary/new_ships.json" ]; then
+          cp summary/new_ships.json .
+          echo "新飞船数据已准备就绪"
+        else
+          echo "没有发现新飞船"
+        fi
+        
+        # 将材料分析文件添加到发布包
+        if [ -f "summary/new_ships_materials.txt" ]; then
+          cp summary/new_ships_materials.txt .
+          echo "新飞船材料分析已准备就绪"
+        fi
+
     - name: Create release body
       if: steps.sisi-tq-delta.outputs.has-delta == 'true'
       run: |
@@ -244,6 +269,14 @@ jobs:
         else
           echo "No differences found between SISI and TQ" >> release-body.txt
         fi
+        echo "" >> release-body.txt
+        
+        echo "## New Ships Analysis" >> release-body.txt
+        if [ -f "summary/summary_report.md" ]; then
+          cat summary/summary_report.md >> release-body.txt
+        else
+          echo "No new ships analysis available" >> release-body.txt
+        fi
 
     - name: Create release
       if: steps.sisi-tq-delta.outputs.has-delta == 'true'
@@ -253,6 +286,8 @@ jobs:
           sde-tq-*.tar.xz
           sde-sisi-*.tar.xz
           sisi-vs-tq-delta.tar.xz
+          new_ships.json
+          new_ships_materials.txt
         body_path: release-body.txt
         tag_name: sde-comparison-tq-${{ needs.build-numbers.outputs.tq-build-number }}-sisi-${{ needs.build-numbers.outputs.sisi-build-number }}
         fail_on_unmatched_files: true
