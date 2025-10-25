@@ -180,8 +180,7 @@ def main():
         "delta",
         "sisi-jsonl/groups.jsonl",
         "sisi-jsonl/types.jsonl",
-        "sisi-jsonl/blueprints.jsonl",
-        "tq-jsonl/types.jsonl"
+        "sisi-jsonl/blueprints.jsonl"
     ]
     
     for file_path in required_files:
@@ -194,11 +193,6 @@ def main():
     sisi_groups_data = load_jsonl("sisi-jsonl/groups.jsonl")
     print(f"加载了 {len(sisi_groups_data)} 个 SISI groups")
     
-    print("加载 TQ types 数据...")
-    tq_types_data = load_jsonl("tq-jsonl/types.jsonl")
-    print(f"加载了 {len(tq_types_data)} 个 TQ types")
-    
-    # 加载 SISI 数据用于蓝图分析
     print("加载 SISI types 数据...")
     sisi_types_data = load_jsonl("sisi-jsonl/types.jsonl")
     print(f"加载了 {len(sisi_types_data)} 个 SISI types")
@@ -217,7 +211,7 @@ def main():
         return
     
     # 分析新增的 types
-    new_ships, category_stats = analyze_new_types(added_types, sisi_groups_data, tq_types_data)
+    new_ships, category_stats = analyze_new_types(added_types, sisi_groups_data, sisi_types_data)
     
     # 查找新飞船的蓝图
     print("\n=== 蓝图分析 ===")
