@@ -229,6 +229,12 @@ jobs:
           echo "本次更新未发现新飞船" > new_ships_materials.txt
           echo "创建了空的材料分析文件"
         fi
+        
+        # 将新飞船分析 Markdown 文件添加到发布包
+        if [ -f "summary/new_ships_analysis.md" ]; then
+          cp summary/new_ships_analysis.md .
+          echo "新飞船分析 Markdown 已准备就绪"
+        fi
 
     - name: Create tarballs
       if: steps.sisi-tq-delta.outputs.has-delta == 'true'
@@ -271,14 +277,6 @@ jobs:
         else
           echo "No differences found between SISI and TQ" >> release-body.txt
         fi
-        echo "" >> release-body.txt
-        
-        echo "## New Ships Analysis" >> release-body.txt
-        if [ -f "summary/summary_report.md" ]; then
-          cat summary/summary_report.md >> release-body.txt
-        else
-          echo "No new ships analysis available" >> release-body.txt
-        fi
 
     - name: Create release
       if: steps.sisi-tq-delta.outputs.has-delta == 'true'
@@ -290,6 +288,7 @@ jobs:
           sisi-vs-tq-delta.tar.xz
           new_ships.json
           new_ships_materials.txt
+          new_ships_analysis.md
         body_path: release-body.txt
         tag_name: sde-comparison-tq-${{ needs.build-numbers.outputs.tq-build-number }}-sisi-${{ needs.build-numbers.outputs.sisi-build-number }}
         fail_on_unmatched_files: true

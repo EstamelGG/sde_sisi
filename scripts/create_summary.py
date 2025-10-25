@@ -280,6 +280,36 @@ def main():
                         f.write(f"- {material['name']}（{material['quantity']}数量）\n")
                 f.write("\n")
     
+    # 创建新飞船分析 Markdown 文件
+    with open("summary/new_ships_analysis.md", "w", encoding="utf-8") as f:
+        f.write("# 新飞船分析报告\n\n")
+        
+        if not blueprint_analysis:
+            f.write("## 本次更新未发现新飞船\n\n")
+            f.write("本次 SDE 更新中没有发现新增的飞船类型。\n")
+        else:
+            f.write(f"## 发现 {len(blueprint_analysis)} 艘新飞船\n\n")
+            
+            for i, ship_info in enumerate(blueprint_analysis, 1):
+                f.write(f"### {i}. {ship_info['ship_name']}\n\n")
+                f.write(f"**TypeID**: {ship_info['ship_id']}\n\n")
+                
+                if ship_info['status'] == "未找到蓝图":
+                    f.write("**制造蓝图**: 未找到蓝图\n\n")
+                    f.write("> 该飞船暂时没有可用的制造蓝图。\n\n")
+                else:
+                    f.write("**制造材料**:\n\n")
+                    for material in ship_info['materials']:
+                        f.write(f"- {material['name']} × {material['quantity']}\n")
+                    f.write("\n")
+                
+                f.write("---\n\n")
+            
+            f.write("## 统计信息\n\n")
+            f.write(f"- **新增飞船总数**: {len(blueprint_analysis)}\n")
+            f.write(f"- **有蓝图的飞船**: {sum(1 for ship in blueprint_analysis if ship['status'] != '未找到蓝图')}\n")
+            f.write(f"- **无蓝图的飞船**: {sum(1 for ship in blueprint_analysis if ship['status'] == '未找到蓝图')}\n")
+    
     print(f"\n=== 汇总完成 ===")
     print(f"新增 Types 总数: {len(added_types)}")
     print(f"新增飞船数量: {len(new_ships)}")
