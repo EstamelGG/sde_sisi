@@ -1,0 +1,294 @@
+name: Create SDE (Unified SISI + TQ)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tq-build-number:
+        description: 'Tranquility - Build number'
+        required: false
+      sisi-build-number:
+        description: 'Singularity - Build number'
+        required: false
+  schedule:
+  - cron: '15 * * * *'
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  build-numbers:
+    name: Get build numbers
+    runs-on: ubuntu-latest
+
+    outputs:
+      tq-build-number: ${{ steps.get-tq-build.outputs.build-number }}
+      sisi-build-number: ${{ steps.get-sisi-build.outputs.build-number }}
+      new-tag: ${{ steps.check-tag.outputs.new-tag }}
+
+    steps:
+    - name: Get TQ build number
+      id: get-tq-build
+      run: |
+        if [ -n "${{ github.event.inputs.tq-build-number }}" ]; then
+          TQ_BUILD_NUMBER=${{ github.event.inputs.tq-build-number }}
+        else
+          TQ_BUILD_NUMBER=$(curl -s https://binaries.eveonline.com/eveclient_TQ.json | jq -r '.build')
+        fi
+
+        echo "TQ Build number: ${TQ_BUILD_NUMBER}"
+        echo "build-number=${TQ_BUILD_NUMBER}" >> $GITHUB_OUTPUT
+
+    - name: Get SISI build number
+      id: get-sisi-build
+      run: |
+        if [ -n "${{ github.event.inputs.sisi-build-number }}" ]; then
+          SISI_BUILD_NUMBER=${{ github.event.inputs.sisi-build-number }}
+        else
+          SISI_BUILD_NUMBER=$(curl -s https://binaries.eveonline.com/eveclient_SISI.json | jq -r '.build')
+        fi
+
+        echo "SISI Build number: ${SISI_BUILD_NUMBER}"
+        echo "build-number=${SISI_BUILD_NUMBER}" >> $GITHUB_OUTPUT
+
+    - name: Check for existing tag
+      id: check-tag
+      run: |
+        TAG_NAME="sde-unified-tq-${{ steps.get-tq-build.outputs.build-number }}-sisi-${{ steps.get-sisi-build.outputs.build-number }}"
+        REF_NAME=$(curl -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -s https://api.github.com/repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG_NAME} | jq -r '.ref')
+
+        echo "Tag name: ${TAG_NAME}"
+        echo "Ref name: ${REF_NAME}"
+
+        if [ -n "${REF_NAME}" ] && [ "${REF_NAME}" != "null" ]; then
+          echo "Tag ${TAG_NAME} already exists"
+
+          echo "new-tag=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        echo "new-tag=true" >> $GITHUB_OUTPUT
+
+  fetch-tq-data:
+    name: Fetch TQ data-files
+    runs-on: windows-latest
+
+    needs: [build-numbers]
+    if: needs.build-numbers.outputs.new-tag == 'true'
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Python2
+      run: |
+        choco install python2
+        C:\Python27\python.exe -m pip install --upgrade pip
+        C:\Python27\python.exe -m pip install requests
+
+    - name: Download TQ loaders
+      run: |
+        C:\Python27\python.exe scripts/download_loaders.py ${{ needs.build-numbers.outputs.tq-build-number }} tranquility
+
+    - name: Execute TQ loaders
+      run: |
+        C:\Python27\python.exe scripts/execute_loaders.py
+
+    - name: Publish TQ artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: tq-data-files
+        path: |
+          data/build-number.txt
+          data/*.static
+          json
+
+  fetch-sisi-data:
+    name: Fetch SISI data-files
+    runs-on: windows-latest
+
+    needs: [build-numbers]
+    if: needs.build-numbers.outputs.new-tag == 'true'
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Python2
+      run: |
+        choco install python2
+        C:\Python27\python.exe -m pip install --upgrade pip
+        C:\Python27\python.exe -m pip install requests
+
+    - name: Download SISI loaders
+      run: |
+        C:\Python27\python.exe scripts/download_loaders.py ${{ needs.build-numbers.outputs.sisi-build-number }} singularity
+
+    - name: Execute SISI loaders
+      run: |
+        C:\Python27\python.exe scripts/execute_loaders.py
+
+    - name: Publish SISI artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: sisi-data-files
+        path: |
+          data/build-number.txt
+          data/*.static
+          json
+
+  create-sde:
+    name: Create and compare SDEs
+    runs-on: ubuntu-latest
+
+    needs:
+    - build-numbers
+    - fetch-tq-data
+    - fetch-sisi-data
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Download TQ artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: tq-data-files
+        path: tq-data
+
+    - name: Download SISI artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: sisi-data-files
+        path: sisi-data
+
+    - name: Create TQ SDE
+      run: |
+        cp -r tq-data/* .
+        python scripts/convert_to_yaml.py
+        mv yaml tq-yaml
+        mv data/build-number.txt tq-build-number.txt
+
+    - name: Create SISI SDE
+      run: |
+        cp -r sisi-data/* .
+        python scripts/convert_to_yaml.py
+        mv yaml sisi-yaml
+        mv data/build-number.txt sisi-build-number.txt
+
+    - name: Create SISI vs TQ delta
+      id: sisi-tq-delta
+      run: |
+        # Use TQ as the base (left) and SISI as the comparison (right)
+        python scripts/create_delta.py tq-yaml
+        mv delta sisi-vs-tq-delta
+
+        if [ "$(ls sisi-vs-tq-delta/*.yaml 2>/dev/null | wc -l)" -eq 0 ]; then
+          echo "No differences between SISI and TQ"
+          echo "has-delta=false" >> $GITHUB_OUTPUT
+        else
+          echo "Found differences between SISI and TQ"
+          echo "has-delta=true" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Download latest TQ SDE for comparison
+      run: |
+        SDE_VERSION=$(curl -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -s https://api.github.com/repos/${GITHUB_REPOSITORY}/releases | jq -r '.[].tag_name' | grep "tranquility" | head -n 1)
+        URL_SDE=$(curl -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -s https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest | jq -r '.assets[] | select(.name == "'${SDE_VERSION}'.tar.xz") | .url')
+
+        echo "Latest TQ SDE: ${SDE_VERSION}"
+        echo "URL SDE: ${URL_SDE}"
+
+        curl -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/octet-stream" -L -s ${URL_SDE} -o ${SDE_VERSION}.tar.xz
+        tar Jxf ${SDE_VERSION}.tar.xz
+        mv sde sde-tq-latest
+
+        rm ${SDE_VERSION}.tar.xz
+
+    - name: Create TQ vs latest TQ delta
+      run: |
+        python scripts/create_delta.py sde-tq-latest
+        mv delta tq-vs-latest-delta
+
+    - name: Create SISI vs latest TQ delta
+      run: |
+        cp -r sisi-yaml yaml
+        python scripts/create_delta.py sde-tq-latest
+        mv delta sisi-vs-latest-delta
+
+    - name: Tag (no delta)
+      if: steps.sisi-tq-delta.outputs.has-delta == 'false'
+      run: |
+        git tag sde-unified-tq-${{ needs.build-numbers.outputs.tq-build-number }}-sisi-${{ needs.build-numbers.outputs.sisi-build-number }}
+        git push origin sde-unified-tq-${{ needs.build-numbers.outputs.tq-build-number }}-sisi-${{ needs.build-numbers.outputs.sisi-build-number }}
+
+    - name: Create tarballs
+      if: steps.sisi-tq-delta.outputs.has-delta == 'true'
+      run: |
+        TQ_BUILD_NUMBER=$(cat tq-build-number.txt)
+        SISI_BUILD_NUMBER=$(cat sisi-build-number.txt)
+
+        mkdir -p package/tq package/sisi package/deltas
+
+        # Package TQ SDE
+        mv tq-yaml package/tq/sde
+        (cd package/tq && tar Jcf ../../sde-tq-${TQ_BUILD_NUMBER}.tar.xz sde)
+
+        # Package SISI SDE
+        mv sisi-yaml package/sisi/sde
+        (cd package/sisi && tar Jcf ../../sde-sisi-${SISI_BUILD_NUMBER}.tar.xz sde)
+
+        # Package deltas
+        mv sisi-vs-tq-delta package/deltas/sisi-vs-tq
+        mv tq-vs-latest-delta package/deltas/tq-vs-latest
+        mv sisi-vs-latest-delta package/deltas/sisi-vs-latest
+
+        (cd package/deltas && tar Jcf ../../deltas.tar.xz sisi-vs-tq tq-vs-latest sisi-vs-latest)
+
+    - name: Create release body
+      if: steps.sisi-tq-delta.outputs.has-delta == 'true'
+      run: |
+        TQ_BUILD_NUMBER=$(cat tq-build-number.txt)
+        SISI_BUILD_NUMBER=$(cat sisi-build-number.txt)
+
+        echo "# SDE Unified Release" > release-body.txt
+        echo "" >> release-body.txt
+        echo "## Build Information" >> release-body.txt
+        echo "- **TQ Build**: ${TQ_BUILD_NUMBER}" >> release-body.txt
+        echo "- **SISI Build**: ${SISI_BUILD_NUMBER}" >> release-body.txt
+        echo "" >> release-body.txt
+
+        echo "## SISI vs TQ Differences" >> release-body.txt
+        if [ -f "package/deltas/sisi-vs-tq/files.delta.md" ]; then
+          cat package/deltas/sisi-vs-tq/files.delta.md >> release-body.txt
+        else
+          echo "No differences found between SISI and TQ" >> release-body.txt
+        fi
+        echo "" >> release-body.txt
+
+        echo "## TQ vs Latest TQ Changes" >> release-body.txt
+        if [ -f "package/deltas/tq-vs-latest/files.delta.md" ]; then
+          cat package/deltas/tq-vs-latest/files.delta.md >> release-body.txt
+        else
+          echo "No changes in TQ since last release" >> release-body.txt
+        fi
+        echo "" >> release-body.txt
+
+        echo "## SISI vs Latest TQ Changes" >> release-body.txt
+        if [ -f "package/deltas/sisi-vs-latest/files.delta.md" ]; then
+          cat package/deltas/sisi-vs-latest/files.delta.md >> release-body.txt
+        else
+          echo "No differences between SISI and latest TQ" >> release-body.txt
+        fi
+
+    - name: Create release
+      if: steps.sisi-tq-delta.outputs.has-delta == 'true'
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          sde-tq-*.tar.xz
+          sde-sisi-*.tar.xz
+          deltas.tar.xz
+        body_path: release-body.txt
+        tag_name: sde-unified-tq-${{ needs.build-numbers.outputs.tq-build-number }}-sisi-${{ needs.build-numbers.outputs.sisi-build-number }}
+        fail_on_unmatched_files: true

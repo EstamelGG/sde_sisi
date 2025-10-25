@@ -1,0 +1,8 @@
+/.env
+/data
+/delta
+/json
+/pyd
+/sde
+/yaml
+/.idea
