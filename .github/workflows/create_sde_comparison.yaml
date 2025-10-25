@@ -207,8 +207,7 @@ jobs:
       if: steps.sisi-tq-delta.outputs.has-delta == 'true'
       run: |
         # 准备汇总工具所需的数据
-        cp -r tq-jsonl tq-jsonl
-        cp -r sisi-jsonl sisi-jsonl
+        # 数据文件已经在正确位置，只需要复制 delta 文件
         cp -r sisi-vs-tq-delta delta
         
         # 运行汇总工具
