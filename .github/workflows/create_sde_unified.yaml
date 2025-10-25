@@ -165,25 +165,25 @@ jobs:
     - name: Create TQ SDE
       run: |
         cp -r tq-data/* .
-        python scripts/convert_to_yaml.py
-        mv yaml tq-yaml
+        python scripts/convert_to_jsonl.py
+        mv jsonl tq-jsonl
         mv data/build-number.txt tq-build-number.txt
 
     - name: Create SISI SDE
       run: |
         cp -r sisi-data/* .
-        python scripts/convert_to_yaml.py
-        mv yaml sisi-yaml
+        python scripts/convert_to_jsonl.py
+        mv jsonl sisi-jsonl
         mv data/build-number.txt sisi-build-number.txt
 
     - name: Create SISI vs TQ delta
       id: sisi-tq-delta
       run: |
         # Use TQ as the base (left) and SISI as the comparison (right)
-        python scripts/create_delta.py tq-yaml
+        python scripts/create_delta_jsonl.py tq-jsonl
         mv delta sisi-vs-tq-delta
 
-        if [ "$(ls sisi-vs-tq-delta/*.yaml 2>/dev/null | wc -l)" -eq 0 ]; then
+        if [ "$(ls sisi-vs-tq-delta/*.jsonl 2>/dev/null | wc -l)" -eq 0 ]; then
           echo "No differences between SISI and TQ"
           echo "has-delta=false" >> $GITHUB_OUTPUT
         else
@@ -207,13 +207,13 @@ jobs:
 
     - name: Create TQ vs latest TQ delta
       run: |
-        python scripts/create_delta.py sde-tq-latest
+        python scripts/create_delta_jsonl.py sde-tq-latest
         mv delta tq-vs-latest-delta
 
     - name: Create SISI vs latest TQ delta
       run: |
-        cp -r sisi-yaml yaml
-        python scripts/create_delta.py sde-tq-latest
+        cp -r sisi-jsonl jsonl
+        python scripts/create_delta_jsonl.py sde-tq-latest
         mv delta sisi-vs-latest-delta
 
     - name: Tag (no delta)
@@ -231,11 +231,11 @@ jobs:
         mkdir -p package/tq package/sisi package/deltas
 
         # Package TQ SDE
-        mv tq-yaml package/tq/sde
+        mv tq-jsonl package/tq/sde
         (cd package/tq && tar Jcf ../../sde-tq-${TQ_BUILD_NUMBER}.tar.xz sde)
 
         # Package SISI SDE
-        mv sisi-yaml package/sisi/sde
+        mv sisi-jsonl package/sisi/sde
         (cd package/sisi && tar Jcf ../../sde-sisi-${SISI_BUILD_NUMBER}.tar.xz sde)
 
         # Package deltas

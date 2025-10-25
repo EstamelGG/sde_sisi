@@ -138,17 +138,17 @@ jobs:
 
     - name: Create up-to-date SDE
       run: |
-        python scripts/convert_to_yaml.py
+        python scripts/convert_to_jsonl.py
 
     - name: Create delta
       id: delta
       run: |
-        python scripts/create_delta.py sde-latest
+        python scripts/create_delta_jsonl.py sde-latest
         mv delta delta-latest
-        python scripts/create_delta.py sde-official
+        python scripts/create_delta_jsonl.py sde-official
         mv delta delta-official
 
-        if [ "$(ls delta-latest/*.yaml | wc -l)" -eq 0 ]; then
+        if [ "$(ls delta-latest/*.jsonl | wc -l)" -eq 0 ]; then
           echo "No changes in SDE"
 
           echo "has-delta=false" >> $GITHUB_OUTPUT
@@ -175,7 +175,7 @@ jobs:
 
         mkdir -p package/latest package/official
 
-        mv yaml package/latest/sde
+        mv jsonl package/latest/sde
         mv delta-latest package/latest/sde-delta
         mv delta-official package/official/sde-delta
 

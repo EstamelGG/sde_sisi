@@ -164,15 +164,15 @@ jobs:
     - name: Create TQ SDE
       run: |
         cp -r tq-data/* .
-        python scripts/convert_to_yaml.py
-        mv yaml tq-yaml
+        python scripts/convert_to_jsonl.py
+        mv jsonl tq-jsonl
         mv data/build-number.txt tq-build-number.txt
 
     - name: Create SISI SDE
       run: |
         cp -r sisi-data/* .
-        python scripts/convert_to_yaml.py
-        mv yaml sisi-yaml
+        python scripts/convert_to_jsonl.py
+        mv jsonl sisi-jsonl
         mv data/build-number.txt sisi-build-number.txt
 
     - name: Create SISI vs TQ delta
@@ -181,15 +181,15 @@ jobs:
         # Use TQ as the base (left) and SISI as the comparison (right)
         # This will show what SISI has that TQ doesn't have
         
-        # Copy SISI yaml to current yaml directory for comparison
-        cp -r sisi-yaml yaml
-        cp sisi-build-number.txt yaml/build-number.txt
+        # Copy SISI jsonl to current jsonl directory for comparison
+        cp -r sisi-jsonl jsonl
+        cp sisi-build-number.txt jsonl/build-number.txt
         
         # Create delta using TQ as base
-        python scripts/create_delta.py tq-yaml
+        python scripts/create_delta_jsonl.py tq-jsonl
         mv delta sisi-vs-tq-delta
 
-        if [ "$(ls sisi-vs-tq-delta/*.yaml 2>/dev/null | wc -l)" -eq 0 ]; then
+        if [ "$(ls sisi-vs-tq-delta/*.jsonl 2>/dev/null | wc -l)" -eq 0 ]; then
           echo "No differences between SISI and TQ"
           echo "has-delta=false" >> $GITHUB_OUTPUT
         else
@@ -212,11 +212,11 @@ jobs:
         mkdir -p package/tq package/sisi package/delta
 
         # Package TQ SDE
-        mv tq-yaml package/tq/sde
+        mv tq-jsonl package/tq/sde
         (cd package/tq && tar Jcf ../../sde-tq-${TQ_BUILD_NUMBER}.tar.xz sde)
 
         # Package SISI SDE
-        mv sisi-yaml package/sisi/sde
+        mv sisi-jsonl package/sisi/sde
         (cd package/sisi && tar Jcf ../../sde-sisi-${SISI_BUILD_NUMBER}.tar.xz sde)
 
         # Package delta (SISI vs TQ differences)
