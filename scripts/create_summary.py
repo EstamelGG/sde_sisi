@@ -215,6 +215,8 @@ def analyze_new_items(added_types, groups_data, categories_data):
             "name": item_name,
             "description": item_description,
             "type_id": type_id,
+            "group_id": group_id,
+            "category_id": category_id,
             "group_name": group_name,
             "category_name": category_name
         })
@@ -344,16 +346,47 @@ def main():
         if not all_new_items:
             f.write("本次更新未发现新增物品。\n\n")
         else:
+            # 按 categoryID 和 groupID 分组
+            grouped_items = {}
             for item in all_new_items:
-                category_name = item.get('category_name', '未知类别')
-                group_name = item.get('group_name', '未知组别')
-                description = item.get('description', '')
-                if description:
-                    f.write(f"- **{item['name']}**（{category_name}/{group_name}）\n")
-                    f.write(f"  - {description}\n")
-                else:
-                    f.write(f"- {item['name']}（{category_name}/{group_name}）\n")
-            f.write("\n")
+                category_id = item.get('category_id', 999)  # 未知类别排在最后
+                group_id = item.get('group_id', 999)  # 未知组别排在最后
+                
+                if category_id not in grouped_items:
+                    grouped_items[category_id] = {}
+                if group_id not in grouped_items[category_id]:
+                    grouped_items[category_id][group_id] = []
+                
+                grouped_items[category_id][group_id].append(item)
+            
+            # 按 categoryID 排序并输出
+            for category_id in sorted(grouped_items.keys()):
+                category_items = grouped_items[category_id]
+                
+                # 获取类别名称（从第一个物品中获取）
+                first_item = next(iter(category_items.values()))[0]
+                category_display_name = first_item.get('category_name', '未知类别')
+                
+                f.write(f"## {category_display_name}\n\n")
+                
+                # 按 groupID 排序并输出
+                for group_id in sorted(category_items.keys()):
+                    group_items = category_items[group_id]
+                    
+                    # 获取组别名称
+                    group_display_name = group_items[0].get('group_name', '未知组别')
+                    
+                    f.write(f"### {group_display_name}\n\n")
+                    
+                    # 输出该组别的所有物品
+                    for item in group_items:
+                        description = item.get('description', '')
+                        if description:
+                            f.write(f"- **{item['name']}**\n")
+                            f.write(f"  - {description}\n")
+                        else:
+                            f.write(f"- {item['name']}\n")
+                    f.write("\n")
         
         f.write("# 新增飞船\n\n")
         
