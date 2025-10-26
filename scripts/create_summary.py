@@ -45,7 +45,7 @@ def create_group_to_category_mapping(groups_data):
             group_to_category[group_id] = group_data["categoryID"]
     return group_to_category
 
-def analyze_new_types(added_types, groups_data, tq_types_data):
+def analyze_new_types(added_types, groups_data, types_data):
     """分析新增的 types，找出属于飞船类别的"""
     print("创建 groupID 到 categoryID 的映射...")
     group_to_category = create_group_to_category_mapping(groups_data)
@@ -172,6 +172,41 @@ def create_blueprint_analysis(new_ships, ship_blueprints, types_data):
     
     return analysis
 
+def analyze_new_items(added_types, groups_data, categories_data):
+    """分析所有新增物品，获取类别和组别信息"""
+    new_items = []
+    
+    for type_id, type_data in added_types.items():
+        # 获取物品名称
+        name_data = type_data.get("name", {})
+        item_name = name_data.get("zh") or name_data.get("en", f"TypeID {type_id}")
+        
+        # 获取组别信息
+        group_id = type_data.get("groupID")
+        group_name = "未知组别"
+        category_name = "未知类别"
+        
+        if group_id in groups_data:
+            group_data = groups_data[group_id]
+            group_name_data = group_data.get("name", {})
+            group_name = group_name_data.get("zh") or group_name_data.get("en", f"GroupID {group_id}")
+            
+            # 获取类别信息
+            category_id = group_data.get("categoryID")
+            if category_id is not None and category_id in categories_data:
+                category_data = categories_data[category_id]
+                category_name_data = category_data.get("name", {})
+                category_name = category_name_data.get("zh") or category_name_data.get("en", f"CategoryID {category_id}")
+        
+        new_items.append({
+            "name": item_name,
+            "type_id": type_id,
+            "group_name": group_name,
+            "category_name": category_name
+        })
+    
+    return new_items
+
 def main():
     print("=== SDE 汇总工具 ===")
     
@@ -180,7 +215,8 @@ def main():
         "delta",
         "sisi-jsonl/groups.jsonl",
         "sisi-jsonl/types.jsonl",
-        "sisi-jsonl/blueprints.jsonl"
+        "sisi-jsonl/blueprints.jsonl",
+        "sisi-jsonl/categories.jsonl"
     ]
     
     for file_path in required_files:
@@ -192,6 +228,10 @@ def main():
     print("加载 SISI groups 数据...")
     sisi_groups_data = load_jsonl("sisi-jsonl/groups.jsonl")
     print(f"加载了 {len(sisi_groups_data)} 个 SISI groups")
+    
+    print("加载 SISI categories 数据...")
+    sisi_categories_data = load_jsonl("sisi-jsonl/categories.jsonl")
+    print(f"加载了 {len(sisi_categories_data)} 个 SISI categories")
     
     print("加载 SISI types 数据...")
     sisi_types_data = load_jsonl("sisi-jsonl/types.jsonl")
@@ -280,35 +320,36 @@ def main():
                         f.write(f"- {material['name']}（{material['quantity']}数量）\n")
                 f.write("\n")
     
-    # 创建新飞船分析 Markdown 文件
-    with open("summary/new_ships_analysis.md", "w", encoding="utf-8") as f:
-        f.write("# 新飞船分析报告\n\n")
+    # 创建新增物品分析
+    all_new_items = analyze_new_items(added_types, sisi_groups_data, sisi_categories_data)
+    
+    # 创建 whats_new.md 文件
+    with open("summary/whats_new.md", "w", encoding="utf-8") as f:
+        f.write("# 新增物品\n\n")
+        
+        if not all_new_items:
+            f.write("本次更新未发现新增物品。\n\n")
+        else:
+            for item in all_new_items:
+                category_name = item.get('category_name', '未知类别')
+                group_name = item.get('group_name', '未知组别')
+                f.write(f"- {item['name']}（{category_name}/{group_name}）\n")
+            f.write("\n")
+        
+        f.write("# 新增飞船\n\n")
         
         if not blueprint_analysis:
-            f.write("## 本次更新未发现新飞船\n\n")
-            f.write("本次 SDE 更新中没有发现新增的飞船类型。\n")
+            f.write("本次更新未发现新飞船。\n")
         else:
-            f.write(f"## 发现 {len(blueprint_analysis)} 艘新飞船\n\n")
-            
-            for i, ship_info in enumerate(blueprint_analysis, 1):
-                f.write(f"### {i}. {ship_info['ship_name']}\n\n")
-                f.write(f"**TypeID**: {ship_info['ship_id']}\n\n")
+            for ship_info in blueprint_analysis:
+                f.write(f"## {ship_info['ship_name']}\n")
                 
                 if ship_info['status'] == "未找到蓝图":
-                    f.write("**制造蓝图**: 未找到蓝图\n\n")
-                    f.write("> 该飞船暂时没有可用的制造蓝图。\n\n")
+                    f.write("- 未找到蓝图\n")
                 else:
-                    f.write("**制造材料**:\n\n")
                     for material in ship_info['materials']:
                         f.write(f"- {material['name']} × {material['quantity']}\n")
-                    f.write("\n")
-                
-                f.write("---\n\n")
-            
-            f.write("## 统计信息\n\n")
-            f.write(f"- **新增飞船总数**: {len(blueprint_analysis)}\n")
-            f.write(f"- **有蓝图的飞船**: {sum(1 for ship in blueprint_analysis if ship['status'] != '未找到蓝图')}\n")
-            f.write(f"- **无蓝图的飞船**: {sum(1 for ship in blueprint_analysis if ship['status'] == '未找到蓝图')}\n")
+                f.write("\n")
     
     print(f"\n=== 汇总完成 ===")
     print(f"新增 Types 总数: {len(added_types)}")
