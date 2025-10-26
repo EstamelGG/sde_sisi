@@ -181,6 +181,10 @@ def analyze_new_items(added_types, groups_data, categories_data):
         name_data = type_data.get("name", {})
         item_name = name_data.get("zh") or name_data.get("en", f"TypeID {type_id}")
         
+        # 获取物品描述
+        description_data = type_data.get("description", {})
+        item_description = description_data.get("zh") or description_data.get("en", "")
+        
         # 获取组别信息
         group_id = type_data.get("groupID")
         group_name = "未知组别"
@@ -200,6 +204,7 @@ def analyze_new_items(added_types, groups_data, categories_data):
         
         new_items.append({
             "name": item_name,
+            "description": item_description,
             "type_id": type_id,
             "group_name": group_name,
             "category_name": category_name
@@ -333,7 +338,12 @@ def main():
             for item in all_new_items:
                 category_name = item.get('category_name', '未知类别')
                 group_name = item.get('group_name', '未知组别')
-                f.write(f"- {item['name']}（{category_name}/{group_name}）\n")
+                description = item.get('description', '')
+                if description:
+                    f.write(f"- **{item['name']}**（{category_name}/{group_name}）\n")
+                    f.write(f"  - {description}\n")
+                else:
+                    f.write(f"- {item['name']}（{category_name}/{group_name}）\n")
             f.write("\n")
         
         f.write("# 新增飞船\n\n")
