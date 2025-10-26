@@ -337,8 +337,15 @@ def main():
     # 创建新增物品分析
     all_new_items = analyze_new_items(added_types, sisi_groups_data, sisi_categories_data)
     
+    # 获取 SISI 版本号
+    sisi_build_number = ""
+    if os.path.exists("sisi-build-number.txt"):
+        with open("sisi-build-number.txt", "r", encoding="utf-8") as f:
+            sisi_build_number = f.read().strip()
+    
     # 创建 whats_new.md 文件
-    with open("summary/whats_new.md", "w", encoding="utf-8") as f:
+    whats_new_filename = f"summary/whats_new_sisi_{sisi_build_number}.md" if sisi_build_number else "summary/whats_new.md"
+    with open(whats_new_filename, "w", encoding="utf-8") as f:
         f.write("# 新增物品\n\n")
         
         if not all_new_items:

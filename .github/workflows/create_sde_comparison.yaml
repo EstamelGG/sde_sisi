@@ -207,14 +207,20 @@ jobs:
       if: steps.sisi-tq-delta.outputs.has-delta == 'true'
       run: |
         # 准备汇总工具所需的数据
-        # 数据文件已经在正确位置，只需要复制 delta 文件
+        # 数据文件已经在正确位置，只需要复制 delta 文件和版本号文件
         cp -r sisi-vs-tq-delta delta
+        cp sisi-build-number.txt .
         
         # 运行汇总工具
         python scripts/create_summary.py
         
         # 将 whats_new.md 文件添加到发布包
-        if [ -f "summary/whats_new.md" ]; then
+        SISI_BUILD_NUMBER=$(cat sisi-build-number.txt)
+        WHATS_NEW_FILE="summary/whats_new_sisi_${SISI_BUILD_NUMBER}.md"
+        if [ -f "$WHATS_NEW_FILE" ]; then
+          cp "$WHATS_NEW_FILE" whats_new.md
+          echo "whats_new.md 已准备就绪 (SISI ${SISI_BUILD_NUMBER})"
+        elif [ -f "summary/whats_new.md" ]; then
           cp summary/whats_new.md .
           echo "whats_new.md 已准备就绪"
         fi
