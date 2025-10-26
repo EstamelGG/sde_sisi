@@ -183,7 +183,9 @@ def analyze_new_items(added_types, groups_data, categories_data):
         
         # 获取物品描述
         description_data = type_data.get("description", {})
-        item_description = description_data.get("zh") or description_data.get("en", "")
+        raw_description = description_data.get("zh") or description_data.get("en", "")
+        # 格式化描述：清除换行符和多余空白
+        item_description = " ".join(raw_description.split()) if raw_description else ""
         
         # 获取组别信息
         group_id = type_data.get("groupID")
