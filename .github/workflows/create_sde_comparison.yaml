@@ -9,6 +9,11 @@ on:
       sisi-build-number:
         description: 'Singularity - Build number'
         required: false
+      force:
+        description: 'Force execution even if tag already exists'
+        required: false
+        type: boolean
+        default: false
   schedule:
   - cron: '0 */8 * * *'
 
@@ -25,6 +30,7 @@ jobs:
       tq-build-number: ${{ steps.get-tq-build.outputs.build-number }}
       sisi-build-number: ${{ steps.get-sisi-build.outputs.build-number }}
       new-tag: ${{ steps.check-tag.outputs.new-tag }}
+      tag-name: ${{ steps.check-tag.outputs.tag-name }}
 
     steps:
     - name: Get TQ build number
@@ -54,7 +60,29 @@ jobs:
     - name: Check for existing tag
       id: check-tag
       run: |
-        TAG_NAME="sde-comparison-tq-${{ steps.get-tq-build.outputs.build-number }}-sisi-${{ steps.get-sisi-build.outputs.build-number }}"
+        BASE_TAG_NAME="sde-comparison-tq-${{ steps.get-tq-build.outputs.build-number }}-sisi-${{ steps.get-sisi-build.outputs.build-number }}"
+        
+        # Check if force mode is enabled
+        FORCE_MODE="${{ github.event.inputs.force }}"
+        # Check if this is a manual trigger (workflow_dispatch)
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          IS_MANUAL_TRIGGER="true"
+        else
+          IS_MANUAL_TRIGGER="false"
+        fi
+        
+        if [ "${FORCE_MODE}" = "true" ] && [ "${IS_MANUAL_TRIGGER}" = "true" ]; then
+          # Force mode: add timestamp suffix for manual triggers
+          TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
+          TAG_NAME="${BASE_TAG_NAME}-manual-${TIMESTAMP}"
+          echo "Force mode enabled, using tag: ${TAG_NAME}"
+          echo "new-tag=true" >> $GITHUB_OUTPUT
+          echo "tag-name=${TAG_NAME}" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        # Normal mode: check if tag exists
+        TAG_NAME="${BASE_TAG_NAME}"
         REF_NAME=$(curl -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -s https://api.github.com/repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG_NAME} | jq -r '.ref')
 
         echo "Tag name: ${TAG_NAME}"
@@ -63,10 +91,12 @@ jobs:
         if [ -n "${REF_NAME}" ] && [ "${REF_NAME}" != "null" ]; then
           echo "Tag ${TAG_NAME} already exists"
           echo "new-tag=false" >> $GITHUB_OUTPUT
+          echo "tag-name=${TAG_NAME}" >> $GITHUB_OUTPUT
           exit 0
         fi
 
         echo "new-tag=true" >> $GITHUB_OUTPUT
+        echo "tag-name=${TAG_NAME}" >> $GITHUB_OUTPUT
 
   fetch-tq-data:
     name: Fetch TQ data-files
@@ -200,8 +230,9 @@ jobs:
     - name: Tag (no delta)
       if: steps.sisi-tq-delta.outputs.has-delta == 'false'
       run: |
-        git tag sde-comparison-tq-${{ needs.build-numbers.outputs.tq-build-number }}-sisi-${{ needs.build-numbers.outputs.sisi-build-number }}
-        git push origin sde-comparison-tq-${{ needs.build-numbers.outputs.tq-build-number }}-sisi-${{ needs.build-numbers.outputs.sisi-build-number }}
+        TAG_NAME="${{ needs.build-numbers.outputs.tag-name }}"
+        git tag ${TAG_NAME}
+        git push origin ${TAG_NAME}
 
     - name: Create summary analysis
       if: steps.sisi-tq-delta.outputs.has-delta == 'true'
@@ -271,5 +302,5 @@ jobs:
           sisi-vs-tq-delta.tar.xz
           whats_new.md
         body_path: release-body.txt
-        tag_name: sde-comparison-tq-${{ needs.build-numbers.outputs.tq-build-number }}-sisi-${{ needs.build-numbers.outputs.sisi-build-number }}
+        tag_name: ${{ needs.build-numbers.outputs.tag-name }}
         fail_on_unmatched_files: true
