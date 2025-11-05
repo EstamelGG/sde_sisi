@@ -257,6 +257,8 @@ def compare_typedogma_attributes(old_typedogma, new_typedogma, dogma_attributes_
     all_attr_ids = set(old_attrs.keys()) | set(new_attrs.keys())
     
     for attr_id in all_attr_ids:
+        # 检查属性是否在 TQ 中存在（不仅仅是值是否为 0）
+        is_new_attribute = attr_id not in old_attrs
         old_value = old_attrs.get(attr_id, 0)
         new_value = new_attrs.get(attr_id, 0)
         
@@ -267,7 +269,8 @@ def compare_typedogma_attributes(old_typedogma, new_typedogma, dogma_attributes_
                 "attributeID": attr_id,
                 "attributeName": attr_name,
                 "oldValue": old_value,
-                "newValue": new_value
+                "newValue": new_value,
+                "isNewAttribute": is_new_attribute  # 标记是否为新增的属性类型
             })
     
     return changes
@@ -318,6 +321,7 @@ def create_attribute_changes_markdown(items_with_changes, types_data):
                 attr_name = change["attributeName"]
                 old_value = change["oldValue"]
                 new_value = change["newValue"]
+                is_new_attribute = change.get("isNewAttribute", False)
                 
                 # 格式化数值显示
                 if isinstance(old_value, float) and old_value.is_integer():
@@ -325,7 +329,11 @@ def create_attribute_changes_markdown(items_with_changes, types_data):
                 if isinstance(new_value, float) and new_value.is_integer():
                     new_value = int(new_value)
                 
-                lines.append(f"- {attr_name}: {old_value} -> {new_value}\n")
+                # 如果是新增的属性类型，显示更清晰
+                if is_new_attribute:
+                    lines.append(f"- {attr_name}: 新增属性 (值: {new_value})\n")
+                else:
+                    lines.append(f"- {attr_name}: {old_value} -> {new_value}\n")
             
             lines.append("\n")
     
