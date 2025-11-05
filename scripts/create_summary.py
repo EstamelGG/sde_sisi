@@ -331,16 +331,16 @@ def create_attribute_changes_markdown(items_with_changes, types_data):
     
     return "".join(lines)
 
-def compare_manufacturing_activities(old_manufacturing, new_manufacturing, types_data):
-    """比对 manufacturing 活动的变化"""
+def compare_activity_changes(old_activity, new_activity, types_data):
+    """比对活动（manufacturing 或 reaction）的变化"""
     changes = {
         "materials": [],
         "products": []
     }
     
     # 比对材料变化
-    old_materials = {m.get("typeID"): m.get("quantity", 0) for m in old_manufacturing.get("materials", [])}
-    new_materials = {m.get("typeID"): m.get("quantity", 0) for m in new_manufacturing.get("materials", [])}
+    old_materials = {m.get("typeID"): m.get("quantity", 0) for m in old_activity.get("materials", [])}
+    new_materials = {m.get("typeID"): m.get("quantity", 0) for m in new_activity.get("materials", [])}
     
     all_material_ids = set(old_materials.keys()) | set(new_materials.keys())
     for material_id in all_material_ids:
@@ -349,25 +349,17 @@ def compare_manufacturing_activities(old_manufacturing, new_manufacturing, types
         
         if old_qty != new_qty:
             material_name = get_type_name(material_id, types_data)
-            if old_qty == 0:
-                changes["materials"].append({
-                    "name": material_name,
-                    "change": f"新增: {new_qty}"
-                })
-            elif new_qty == 0:
-                changes["materials"].append({
-                    "name": material_name,
-                    "change": f"移除: {old_qty}"
-                })
-            else:
-                changes["materials"].append({
-                    "name": material_name,
-                    "change": f"{old_qty} -> {new_qty}"
-                })
+            # 统一使用 "旧值 -> 新值" 格式，更清晰直观
+            changes["materials"].append({
+                "name": material_name,
+                "change": f"{old_qty} -> {new_qty}",
+                "oldValue": old_qty,
+                "newValue": new_qty
+            })
     
     # 比对产品变化
-    old_products = {p.get("typeID"): p.get("quantity", 0) for p in old_manufacturing.get("products", [])}
-    new_products = {p.get("typeID"): p.get("quantity", 0) for p in new_manufacturing.get("products", [])}
+    old_products = {p.get("typeID"): p.get("quantity", 0) for p in old_activity.get("products", [])}
+    new_products = {p.get("typeID"): p.get("quantity", 0) for p in new_activity.get("products", [])}
     
     all_product_ids = set(old_products.keys()) | set(new_products.keys())
     for product_id in all_product_ids:
@@ -376,41 +368,49 @@ def compare_manufacturing_activities(old_manufacturing, new_manufacturing, types
         
         if old_qty != new_qty:
             product_name = get_type_name(product_id, types_data)
-            if old_qty == 0:
-                changes["products"].append({
-                    "name": product_name,
-                    "change": f"新增: {new_qty}"
-                })
-            elif new_qty == 0:
-                changes["products"].append({
-                    "name": product_name,
-                    "change": f"移除: {old_qty}"
-                })
-            else:
-                changes["products"].append({
-                    "name": product_name,
-                    "change": f"{old_qty} -> {new_qty}"
-                })
+            # 统一使用 "旧值 -> 新值" 格式，更清晰直观
+            changes["products"].append({
+                "name": product_name,
+                "change": f"{old_qty} -> {new_qty}",
+                "oldValue": old_qty,
+                "newValue": new_qty
+            })
     
     return changes
 
 def analyze_blueprint_changes(blueprint_id, old_blueprint, new_blueprint, types_data):
     """分析单个蓝图的变化"""
     changes = {
-        "materials": [],
-        "products": []
+        "manufacturing": {
+            "materials": [],
+            "products": []
+        },
+        "reaction": {
+            "materials": [],
+            "products": []
+        }
     }
     
     old_activities = old_blueprint.get("activities", {})
     new_activities = new_blueprint.get("activities", {})
     
+    # 比对 manufacturing 活动
     old_manufacturing = old_activities.get("manufacturing", {})
     new_manufacturing = new_activities.get("manufacturing", {})
     
     if old_manufacturing or new_manufacturing:
-        manufacturing_changes = compare_manufacturing_activities(old_manufacturing, new_manufacturing, types_data)
-        changes["materials"] = manufacturing_changes["materials"]
-        changes["products"] = manufacturing_changes["products"]
+        manufacturing_changes = compare_activity_changes(old_manufacturing, new_manufacturing, types_data)
+        changes["manufacturing"]["materials"] = manufacturing_changes["materials"]
+        changes["manufacturing"]["products"] = manufacturing_changes["products"]
+    
+    # 比对 reaction 活动
+    old_reaction = old_activities.get("reaction", {})
+    new_reaction = new_activities.get("reaction", {})
+    
+    if old_reaction or new_reaction:
+        reaction_changes = compare_activity_changes(old_reaction, new_reaction, types_data)
+        changes["reaction"]["materials"] = reaction_changes["materials"]
+        changes["reaction"]["products"] = reaction_changes["products"]
     
     return changes
 
@@ -456,30 +456,54 @@ def create_blueprint_comparison_markdown(added_blueprints, removed_blueprints, c
             blueprint_name = get_type_name(blueprint_type_id, types_data)
             lines.append(f"### {blueprint_name} (Blueprint ID: {blueprint_id})\n\n")
             
-            # 获取 manufacturing 信息
+            # 获取 activities 信息
             activities = blueprint_data.get("activities", {})
-            manufacturing = activities.get("manufacturing", {})
             
+            # 显示 manufacturing 活动
+            manufacturing = activities.get("manufacturing", {})
             if manufacturing:
+                lines.append("**制造活动 (Manufacturing):**\n")
                 # 材料
                 materials = manufacturing.get("materials", [])
                 if materials:
-                    lines.append("**制造材料:**\n")
+                    lines.append("  - 材料:\n")
                     for material in materials:
                         material_name = get_type_name(material.get("typeID"), types_data)
                         quantity = material.get("quantity", 0)
-                        lines.append(f"- {material_name} × {quantity}\n")
-                    lines.append("\n")
+                        lines.append(f"    - {material_name} × {quantity}\n")
                 
                 # 产品
                 products = manufacturing.get("products", [])
                 if products:
-                    lines.append("**输出物品:**\n")
+                    lines.append("  - 输出物品:\n")
                     for product in products:
                         product_name = get_type_name(product.get("typeID"), types_data)
                         quantity = product.get("quantity", 0)
-                        lines.append(f"- {product_name} × {quantity}\n")
-                    lines.append("\n")
+                        lines.append(f"    - {product_name} × {quantity}\n")
+                lines.append("\n")
+            
+            # 显示 reaction 活动
+            reaction = activities.get("reaction", {})
+            if reaction:
+                lines.append("**反应活动 (Reaction):**\n")
+                # 材料
+                materials = reaction.get("materials", [])
+                if materials:
+                    lines.append("  - 材料:\n")
+                    for material in materials:
+                        material_name = get_type_name(material.get("typeID"), types_data)
+                        quantity = material.get("quantity", 0)
+                        lines.append(f"    - {material_name} × {quantity}\n")
+                
+                # 产品
+                products = reaction.get("products", [])
+                if products:
+                    lines.append("  - 输出物品:\n")
+                    for product in products:
+                        product_name = get_type_name(product.get("typeID"), types_data)
+                        quantity = product.get("quantity", 0)
+                        lines.append(f"    - {product_name} × {quantity}\n")
+                lines.append("\n")
     else:
         lines.append("## 新增蓝图\n\n")
         lines.append("本次更新未发现新增蓝图。\n\n")
@@ -502,46 +526,96 @@ def create_blueprint_comparison_markdown(added_blueprints, removed_blueprints, c
                 # 分析变化
                 changes = analyze_blueprint_changes(blueprint_id, old_blueprint_data, new_blueprint_data, types_data)
                 
-                # 材料变化
-                if changes["materials"]:
-                    lines.append("**制造材料变更:**\n")
-                    for material_change in changes["materials"]:
-                        lines.append(f"- {material_change['name']}: {material_change['change']}\n")
+                has_changes = False
+                
+                # 制造活动 (Manufacturing) 变化
+                manufacturing_changes = changes.get("manufacturing", {})
+                if manufacturing_changes.get("materials") or manufacturing_changes.get("products"):
+                    has_changes = True
+                    lines.append("**制造活动 (Manufacturing) 变更:**\n")
+                    
+                    # 材料变化
+                    if manufacturing_changes["materials"]:
+                        lines.append("  - 材料变更:\n")
+                        for material_change in manufacturing_changes["materials"]:
+                            lines.append(f"    - {material_change['name']}: {material_change['change']}\n")
+                    
+                    # 产品变化
+                    if manufacturing_changes["products"]:
+                        lines.append("  - 输出物品变更:\n")
+                        for product_change in manufacturing_changes["products"]:
+                            lines.append(f"    - {product_change['name']}: {product_change['change']}\n")
+                    
                     lines.append("\n")
                 
-                # 产品变化
-                if changes["products"]:
-                    lines.append("**输出物品变更:**\n")
-                    for product_change in changes["products"]:
-                        lines.append(f"- {product_change['name']}: {product_change['change']}\n")
+                # 反应活动 (Reaction) 变化
+                reaction_changes = changes.get("reaction", {})
+                if reaction_changes.get("materials") or reaction_changes.get("products"):
+                    has_changes = True
+                    lines.append("**反应活动 (Reaction) 变更:**\n")
+                    
+                    # 材料变化
+                    if reaction_changes["materials"]:
+                        lines.append("  - 材料变更:\n")
+                        for material_change in reaction_changes["materials"]:
+                            lines.append(f"    - {material_change['name']}: {material_change['change']}\n")
+                    
+                    # 产品变化
+                    if reaction_changes["products"]:
+                        lines.append("  - 输出物品变更:\n")
+                        for product_change in reaction_changes["products"]:
+                            lines.append(f"    - {product_change['name']}: {product_change['change']}\n")
+                    
                     lines.append("\n")
                 
                 # 如果没有材料或产品变化，但蓝图确实改变了，说明可能是其他字段变化
-                if not changes["materials"] and not changes["products"]:
-                    lines.append("蓝图配置已变更（非制造材料/产品变化）\n\n")
+                if not has_changes:
+                    lines.append("蓝图配置已变更（非制造/反应活动变化）\n\n")
             else:
                 # 没有 TQ 数据时，只显示 SISI 的当前配置
                 activities = new_blueprint_data.get("activities", {})
-                manufacturing = activities.get("manufacturing", {})
                 
+                # 显示 manufacturing 活动
+                manufacturing = activities.get("manufacturing", {})
                 if manufacturing:
+                    lines.append("**制造活动 (Manufacturing):**\n")
                     materials = manufacturing.get("materials", [])
                     if materials:
-                        lines.append("**制造材料:**\n")
+                        lines.append("  - 材料:\n")
                         for material in materials:
                             material_name = get_type_name(material.get("typeID"), types_data)
                             quantity = material.get("quantity", 0)
-                            lines.append(f"- {material_name} × {quantity}\n")
-                        lines.append("\n")
+                            lines.append(f"    - {material_name} × {quantity}\n")
                     
                     products = manufacturing.get("products", [])
                     if products:
-                        lines.append("**输出物品:**\n")
+                        lines.append("  - 输出物品:\n")
                         for product in products:
                             product_name = get_type_name(product.get("typeID"), types_data)
                             quantity = product.get("quantity", 0)
-                            lines.append(f"- {product_name} × {quantity}\n")
-                        lines.append("\n")
+                            lines.append(f"    - {product_name} × {quantity}\n")
+                    lines.append("\n")
+                
+                # 显示 reaction 活动
+                reaction = activities.get("reaction", {})
+                if reaction:
+                    lines.append("**反应活动 (Reaction):**\n")
+                    materials = reaction.get("materials", [])
+                    if materials:
+                        lines.append("  - 材料:\n")
+                        for material in materials:
+                            material_name = get_type_name(material.get("typeID"), types_data)
+                            quantity = material.get("quantity", 0)
+                            lines.append(f"    - {material_name} × {quantity}\n")
+                    
+                    products = reaction.get("products", [])
+                    if products:
+                        lines.append("  - 输出物品:\n")
+                        for product in products:
+                            product_name = get_type_name(product.get("typeID"), types_data)
+                            quantity = product.get("quantity", 0)
+                            lines.append(f"    - {product_name} × {quantity}\n")
+                    lines.append("\n")
     else:
         lines.append("## 蓝图变更\n\n")
         lines.append("本次更新未发现蓝图变更。\n\n")
