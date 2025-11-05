@@ -147,6 +147,273 @@ def get_material_names(materials, types_data):
     
     return material_info
 
+def get_type_name(type_id, types_data):
+    """获取物品名称"""
+    if type_id in types_data:
+        type_data = types_data[type_id]
+        name_data = type_data.get("name", {})
+        # 优先使用中文名称，没有则使用英文
+        return name_data.get("zh") or name_data.get("en", f"TypeID {type_id}")
+    else:
+        return f"TypeID {type_id}"
+
+def load_blueprints_delta(delta_dir):
+    """加载 blueprints.delta.jsonl 文件，提取新增、移除、改动的蓝图"""
+    added_blueprints = {}
+    removed_blueprints = {}
+    changed_blueprints = {}
+    
+    blueprints_delta_file = f"{delta_dir}/blueprints.delta.jsonl"
+    if os.path.exists(blueprints_delta_file):
+        print(f"处理 blueprints delta 文件: {blueprints_delta_file}")
+        with open(blueprints_delta_file, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    record = json.loads(line)
+                    action = record.get("action")
+                    blueprint_id = record.get("id")
+                    blueprint_data = record.get("data", {})
+                    
+                    if action == "added":
+                        added_blueprints[blueprint_id] = blueprint_data
+                    elif action == "removed":
+                        removed_blueprints[blueprint_id] = blueprint_data
+                    elif action == "changed":
+                        changed_blueprints[blueprint_id] = blueprint_data
+    else:
+        print(f"未找到 blueprints delta 文件: {blueprints_delta_file}")
+    
+    return added_blueprints, removed_blueprints, changed_blueprints
+
+def load_typedogma_delta(delta_dir):
+    """加载 typeDogma.delta.jsonl 文件，只提取改动的物品（changed）"""
+    changed_typedogma = {}
+    
+    typedogma_delta_file = f"{delta_dir}/typeDogma.delta.jsonl"
+    if os.path.exists(typedogma_delta_file):
+        print(f"处理 typeDogma delta 文件: {typedogma_delta_file}")
+        with open(typedogma_delta_file, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    record = json.loads(line)
+                    action = record.get("action")
+                    type_id = record.get("id")
+                    typedogma_data = record.get("data", {})
+                    
+                    # 只关注 changed 的操作
+                    if action == "changed":
+                        changed_typedogma[type_id] = typedogma_data
+    else:
+        print(f"未找到 typeDogma delta 文件: {typedogma_delta_file}")
+    
+    return changed_typedogma
+
+def get_attribute_name(attribute_id, dogma_attributes_data):
+    """获取属性名称，优先级：displayNameID.zh > displayNameID.en > name"""
+    if attribute_id not in dogma_attributes_data:
+        return f"AttributeID {attribute_id}"
+    
+    attr_data = dogma_attributes_data[attribute_id]
+    display_name_id = attr_data.get("displayNameID", {})
+    
+    # 优先使用中文
+    if "zh" in display_name_id:
+        return display_name_id["zh"]
+    # 其次使用英文
+    if "en" in display_name_id:
+        return display_name_id["en"]
+    # 最后使用 name 字段
+    if "name" in attr_data:
+        return attr_data["name"]
+    
+    return f"AttributeID {attribute_id}"
+
+def get_type_category_id(type_id, types_data, groups_data):
+    """获取物品的 categoryID"""
+    if type_id not in types_data:
+        return None
+    
+    type_data = types_data[type_id]
+    group_id = type_data.get("groupID")
+    
+    if group_id is None:
+        return None
+    
+    if group_id not in groups_data:
+        return None
+    
+    group_data = groups_data[group_id]
+    return group_data.get("categoryID")
+
+def compare_typedogma_attributes(old_typedogma, new_typedogma, dogma_attributes_data):
+    """比对 typeDogma 中 dogmaAttributes 的变化"""
+    changes = []
+    
+    # 将属性列表转换为字典，方便比对
+    old_attrs = {attr.get("attributeID"): attr.get("value", 0) for attr in old_typedogma.get("dogmaAttributes", [])}
+    new_attrs = {attr.get("attributeID"): attr.get("value", 0) for attr in new_typedogma.get("dogmaAttributes", [])}
+    
+    # 获取所有属性ID
+    all_attr_ids = set(old_attrs.keys()) | set(new_attrs.keys())
+    
+    for attr_id in all_attr_ids:
+        old_value = old_attrs.get(attr_id, 0)
+        new_value = new_attrs.get(attr_id, 0)
+        
+        # 只关注有变化的属性
+        if old_value != new_value:
+            attr_name = get_attribute_name(attr_id, dogma_attributes_data)
+            changes.append({
+                "attributeID": attr_id,
+                "attributeName": attr_name,
+                "oldValue": old_value,
+                "newValue": new_value
+            })
+    
+    return changes
+
+def analyze_type_attributes_changes(changed_typedogma, tq_typedogma_data, types_data, groups_data, 
+                                    dogma_attributes_data, target_categories):
+    """分析物品属性变化，只关注指定类别的物品"""
+    items_with_changes = {}
+    
+    for type_id, new_typedogma in changed_typedogma.items():
+        # 检查物品的 categoryID
+        category_id = get_type_category_id(type_id, types_data, groups_data)
+        
+        # 只关注指定类别的物品
+        if category_id not in target_categories:
+            continue
+        
+        # 获取旧数据
+        old_typedogma = tq_typedogma_data.get(type_id, {})
+        
+        # 比对属性变化
+        changes = compare_typedogma_attributes(old_typedogma, new_typedogma, dogma_attributes_data)
+        
+        if changes:
+            items_with_changes[type_id] = {
+                "type_id": type_id,
+                "changes": changes
+            }
+    
+    return items_with_changes
+
+def create_attribute_changes_markdown(items_with_changes, types_data):
+    """创建属性变化比对的 Markdown 内容"""
+    lines = []
+    
+    lines.append("# 物品属性变更\n\n")
+    
+    if not items_with_changes:
+        lines.append("本次更新未发现物品属性变更。\n\n")
+    else:
+        for type_id, item_info in sorted(items_with_changes.items()):
+            # 获取物品名称
+            item_name = get_type_name(type_id, types_data)
+            lines.append(f"## {item_name}\n\n")
+            
+            # 列出所有属性变化
+            for change in item_info["changes"]:
+                attr_name = change["attributeName"]
+                old_value = change["oldValue"]
+                new_value = change["newValue"]
+                
+                # 格式化数值显示
+                if isinstance(old_value, float) and old_value.is_integer():
+                    old_value = int(old_value)
+                if isinstance(new_value, float) and new_value.is_integer():
+                    new_value = int(new_value)
+                
+                lines.append(f"- {attr_name}: {old_value} -> {new_value}\n")
+            
+            lines.append("\n")
+    
+    return "".join(lines)
+
+def compare_manufacturing_activities(old_manufacturing, new_manufacturing, types_data):
+    """比对 manufacturing 活动的变化"""
+    changes = {
+        "materials": [],
+        "products": []
+    }
+    
+    # 比对材料变化
+    old_materials = {m.get("typeID"): m.get("quantity", 0) for m in old_manufacturing.get("materials", [])}
+    new_materials = {m.get("typeID"): m.get("quantity", 0) for m in new_manufacturing.get("materials", [])}
+    
+    all_material_ids = set(old_materials.keys()) | set(new_materials.keys())
+    for material_id in all_material_ids:
+        old_qty = old_materials.get(material_id, 0)
+        new_qty = new_materials.get(material_id, 0)
+        
+        if old_qty != new_qty:
+            material_name = get_type_name(material_id, types_data)
+            if old_qty == 0:
+                changes["materials"].append({
+                    "name": material_name,
+                    "change": f"新增: {new_qty}"
+                })
+            elif new_qty == 0:
+                changes["materials"].append({
+                    "name": material_name,
+                    "change": f"移除: {old_qty}"
+                })
+            else:
+                changes["materials"].append({
+                    "name": material_name,
+                    "change": f"{old_qty} -> {new_qty}"
+                })
+    
+    # 比对产品变化
+    old_products = {p.get("typeID"): p.get("quantity", 0) for p in old_manufacturing.get("products", [])}
+    new_products = {p.get("typeID"): p.get("quantity", 0) for p in new_manufacturing.get("products", [])}
+    
+    all_product_ids = set(old_products.keys()) | set(new_products.keys())
+    for product_id in all_product_ids:
+        old_qty = old_products.get(product_id, 0)
+        new_qty = new_products.get(product_id, 0)
+        
+        if old_qty != new_qty:
+            product_name = get_type_name(product_id, types_data)
+            if old_qty == 0:
+                changes["products"].append({
+                    "name": product_name,
+                    "change": f"新增: {new_qty}"
+                })
+            elif new_qty == 0:
+                changes["products"].append({
+                    "name": product_name,
+                    "change": f"移除: {old_qty}"
+                })
+            else:
+                changes["products"].append({
+                    "name": product_name,
+                    "change": f"{old_qty} -> {new_qty}"
+                })
+    
+    return changes
+
+def analyze_blueprint_changes(blueprint_id, old_blueprint, new_blueprint, types_data):
+    """分析单个蓝图的变化"""
+    changes = {
+        "materials": [],
+        "products": []
+    }
+    
+    old_activities = old_blueprint.get("activities", {})
+    new_activities = new_blueprint.get("activities", {})
+    
+    old_manufacturing = old_activities.get("manufacturing", {})
+    new_manufacturing = new_activities.get("manufacturing", {})
+    
+    if old_manufacturing or new_manufacturing:
+        manufacturing_changes = compare_manufacturing_activities(old_manufacturing, new_manufacturing, types_data)
+        changes["materials"] = manufacturing_changes["materials"]
+        changes["products"] = manufacturing_changes["products"]
+    
+    return changes
+
 def create_blueprint_analysis(new_ships, ship_blueprints, types_data):
     """创建蓝图分析报告"""
     analysis = []
@@ -172,6 +439,114 @@ def create_blueprint_analysis(new_ships, ship_blueprints, types_data):
         analysis.append(ship_info)
     
     return analysis
+
+def create_blueprint_comparison_markdown(added_blueprints, removed_blueprints, changed_blueprints, 
+                                         tq_blueprints_data, sisi_blueprints_data, types_data):
+    """创建蓝图比对的 Markdown 内容"""
+    lines = []
+    
+    lines.append("# 蓝图变更\n\n")
+    
+    # 新增蓝图
+    if added_blueprints:
+        lines.append("## 新增蓝图\n\n")
+        for blueprint_id, blueprint_data in sorted(added_blueprints.items()):
+            # 获取蓝图名称（通过 blueprintTypeID）
+            blueprint_type_id = blueprint_data.get("blueprintTypeID", blueprint_id)
+            blueprint_name = get_type_name(blueprint_type_id, types_data)
+            lines.append(f"### {blueprint_name} (Blueprint ID: {blueprint_id})\n\n")
+            
+            # 获取 manufacturing 信息
+            activities = blueprint_data.get("activities", {})
+            manufacturing = activities.get("manufacturing", {})
+            
+            if manufacturing:
+                # 材料
+                materials = manufacturing.get("materials", [])
+                if materials:
+                    lines.append("**制造材料:**\n")
+                    for material in materials:
+                        material_name = get_type_name(material.get("typeID"), types_data)
+                        quantity = material.get("quantity", 0)
+                        lines.append(f"- {material_name} × {quantity}\n")
+                    lines.append("\n")
+                
+                # 产品
+                products = manufacturing.get("products", [])
+                if products:
+                    lines.append("**输出物品:**\n")
+                    for product in products:
+                        product_name = get_type_name(product.get("typeID"), types_data)
+                        quantity = product.get("quantity", 0)
+                        lines.append(f"- {product_name} × {quantity}\n")
+                    lines.append("\n")
+    else:
+        lines.append("## 新增蓝图\n\n")
+        lines.append("本次更新未发现新增蓝图。\n\n")
+    
+    # 改动蓝图
+    if changed_blueprints:
+        lines.append("## 蓝图变更\n\n")
+        if not tq_blueprints_data:
+            lines.append("⚠️ 警告: 未找到 TQ 蓝图数据，无法进行详细的变更比对。\n\n")
+        
+        for blueprint_id, new_blueprint_data in sorted(changed_blueprints.items()):
+            # 获取旧蓝图数据
+            old_blueprint_data = tq_blueprints_data.get(blueprint_id, {}) if tq_blueprints_data else {}
+            
+            blueprint_type_id = new_blueprint_data.get("blueprintTypeID", blueprint_id)
+            blueprint_name = get_type_name(blueprint_type_id, types_data)
+            lines.append(f"### {blueprint_name} (Blueprint ID: {blueprint_id})\n\n")
+            
+            if tq_blueprints_data:
+                # 分析变化
+                changes = analyze_blueprint_changes(blueprint_id, old_blueprint_data, new_blueprint_data, types_data)
+                
+                # 材料变化
+                if changes["materials"]:
+                    lines.append("**制造材料变更:**\n")
+                    for material_change in changes["materials"]:
+                        lines.append(f"- {material_change['name']}: {material_change['change']}\n")
+                    lines.append("\n")
+                
+                # 产品变化
+                if changes["products"]:
+                    lines.append("**输出物品变更:**\n")
+                    for product_change in changes["products"]:
+                        lines.append(f"- {product_change['name']}: {product_change['change']}\n")
+                    lines.append("\n")
+                
+                # 如果没有材料或产品变化，但蓝图确实改变了，说明可能是其他字段变化
+                if not changes["materials"] and not changes["products"]:
+                    lines.append("蓝图配置已变更（非制造材料/产品变化）\n\n")
+            else:
+                # 没有 TQ 数据时，只显示 SISI 的当前配置
+                activities = new_blueprint_data.get("activities", {})
+                manufacturing = activities.get("manufacturing", {})
+                
+                if manufacturing:
+                    materials = manufacturing.get("materials", [])
+                    if materials:
+                        lines.append("**制造材料:**\n")
+                        for material in materials:
+                            material_name = get_type_name(material.get("typeID"), types_data)
+                            quantity = material.get("quantity", 0)
+                            lines.append(f"- {material_name} × {quantity}\n")
+                        lines.append("\n")
+                    
+                    products = manufacturing.get("products", [])
+                    if products:
+                        lines.append("**输出物品:**\n")
+                        for product in products:
+                            product_name = get_type_name(product.get("typeID"), types_data)
+                            quantity = product.get("quantity", 0)
+                            lines.append(f"- {product_name} × {quantity}\n")
+                        lines.append("\n")
+    else:
+        lines.append("## 蓝图变更\n\n")
+        lines.append("本次更新未发现蓝图变更。\n\n")
+    
+    return "".join(lines)
 
 def analyze_new_items(added_types, groups_data, categories_data):
     """分析所有新增物品，获取类别和组别信息"""
@@ -235,6 +610,9 @@ def main():
         "sisi-jsonl/categories.jsonl"
     ]
     
+    # TQ 数据文件（可选，用于蓝图比对）
+    tq_blueprints_file = "tq-jsonl/blueprints.jsonl"
+    
     for file_path in required_files:
         if not os.path.exists(file_path):
             print(f"错误: 找不到必要文件 {file_path}")
@@ -257,10 +635,58 @@ def main():
     sisi_blueprints_data = load_jsonl("sisi-jsonl/blueprints.jsonl")
     print(f"加载了 {len(sisi_blueprints_data)} 个 SISI blueprints")
     
+    # 加载 TQ blueprints 数据（用于蓝图比对）
+    tq_blueprints_data = {}
+    if os.path.exists(tq_blueprints_file):
+        print("加载 TQ blueprints 数据...")
+        tq_blueprints_data = load_jsonl(tq_blueprints_file)
+        print(f"加载了 {len(tq_blueprints_data)} 个 TQ blueprints")
+    else:
+        print(f"警告: 未找到 TQ blueprints 文件 {tq_blueprints_file}，蓝图比对功能可能受限")
+    
+    # 加载 dogmaAttributes 数据（用于属性名称映射）
+    print("加载 SISI dogmaAttributes 数据...")
+    sisi_dogma_attributes_data = load_jsonl("sisi-jsonl/dogmaAttributes.jsonl")
+    print(f"加载了 {len(sisi_dogma_attributes_data)} 个 SISI dogmaAttributes")
+    
+    # 加载 TQ typeDogma 数据（用于属性比对）
+    tq_typedogma_file = "tq-jsonl/typeDogma.jsonl"
+    tq_typedogma_data = {}
+    if os.path.exists(tq_typedogma_file):
+        print("加载 TQ typeDogma 数据...")
+        tq_typedogma_data = load_jsonl(tq_typedogma_file)
+        print(f"加载了 {len(tq_typedogma_data)} 个 TQ typeDogma")
+    else:
+        print(f"警告: 未找到 TQ typeDogma 文件 {tq_typedogma_file}，属性比对功能可能受限")
+    
     # 加载 types delta 文件
     print("加载 types delta 文件...")
     added_types = load_delta_files("delta")
     print(f"找到 {len(added_types)} 个新增的 types")
+    
+    # 加载 blueprints delta 文件
+    print("加载 blueprints delta 文件...")
+    added_blueprints, removed_blueprints, changed_blueprints = load_blueprints_delta("delta")
+    print(f"找到 {len(added_blueprints)} 个新增蓝图, {len(removed_blueprints)} 个移除蓝图, {len(changed_blueprints)} 个变更蓝图")
+    
+    # 加载 typeDogma delta 文件（只关注 changed）
+    print("加载 typeDogma delta 文件...")
+    changed_typedogma = load_typedogma_delta("delta")
+    print(f"找到 {len(changed_typedogma)} 个属性变更的物品")
+    
+    # 分析物品属性变化（只关注指定类别的物品）
+    target_categories = {4, 6, 7, 18, 20, 65, 66, 87}
+    if changed_typedogma and tq_typedogma_data:
+        print(f"分析类别 {target_categories} 的物品属性变化...")
+        items_with_attribute_changes = analyze_type_attributes_changes(
+            changed_typedogma, tq_typedogma_data, sisi_types_data, 
+            sisi_groups_data, sisi_dogma_attributes_data, target_categories
+        )
+        print(f"找到 {len(items_with_attribute_changes)} 个有属性变化的物品")
+    else:
+        items_with_attribute_changes = {}
+        if not tq_typedogma_data:
+            print("警告: 未找到 TQ typeDogma 数据，无法进行属性比对")
     
     if not added_types:
         print("没有找到新增的 types，跳过分析")
@@ -402,6 +828,21 @@ def main():
                     for material in ship_info['materials']:
                         f.write(f"- {material['name']} × {material['quantity']}\n")
                 f.write("\n")
+        
+        # 添加蓝图比对部分
+        f.write("\n")
+        blueprint_comparison = create_blueprint_comparison_markdown(
+            added_blueprints, removed_blueprints, changed_blueprints,
+            tq_blueprints_data, sisi_blueprints_data, sisi_types_data
+        )
+        f.write(blueprint_comparison)
+        
+        # 添加物品属性变更部分
+        f.write("\n")
+        attribute_changes = create_attribute_changes_markdown(
+            items_with_attribute_changes, sisi_types_data
+        )
+        f.write(attribute_changes)
     
     print(f"\n=== 汇总完成 ===")
     print(f"新增 Types 总数: {len(added_types)}")
