@@ -186,8 +186,9 @@ def load_blueprints_delta(delta_dir):
     return added_blueprints, removed_blueprints, changed_blueprints
 
 def load_typedogma_delta(delta_dir):
-    """加载 typeDogma.delta.jsonl 文件，只提取改动的物品（changed）"""
+    """加载 typeDogma.delta.jsonl 文件，提取改动的物品（changed）和新增的物品（added）"""
     changed_typedogma = {}
+    added_typedogma = {}
     
     typedogma_delta_file = f"{delta_dir}/typeDogma.delta.jsonl"
     if os.path.exists(typedogma_delta_file):
@@ -200,13 +201,14 @@ def load_typedogma_delta(delta_dir):
                     type_id = record.get("id")
                     typedogma_data = record.get("data", {})
                     
-                    # 只关注 changed 的操作
                     if action == "changed":
                         changed_typedogma[type_id] = typedogma_data
+                    elif action == "added":
+                        added_typedogma[type_id] = typedogma_data
     else:
         print(f"未找到 typeDogma delta 文件: {typedogma_delta_file}")
     
-    return changed_typedogma
+    return changed_typedogma, added_typedogma
 
 def get_attribute_name(attribute_id, dogma_attributes_data):
     """获取属性名称，优先级：displayNameID.zh > displayNameID.en > name"""
@@ -630,8 +632,9 @@ def create_blueprint_comparison_markdown(added_blueprints, removed_blueprints, c
     
     return "".join(lines)
 
-def analyze_new_items(added_types, groups_data, categories_data):
-    """分析所有新增物品，获取类别和组别信息"""
+def analyze_new_items(added_types, groups_data, categories_data, added_typedogma, 
+                     typedogma_data, dogma_attributes_data, target_categories):
+    """分析所有新增物品，获取类别和组别信息，对指定类别的物品收集属性信息"""
     new_items = []
     
     for type_id, type_data in added_types.items():
@@ -655,6 +658,7 @@ def analyze_new_items(added_types, groups_data, categories_data):
         group_id = type_data.get("groupID")
         group_name = "未知组别"
         category_name = "未知类别"
+        category_id = None
         
         if group_id in groups_data:
             group_data = groups_data[group_id]
@@ -668,7 +672,7 @@ def analyze_new_items(added_types, groups_data, categories_data):
                 category_name_data = category_data.get("name", {})
                 category_name = category_name_data.get("zh") or category_name_data.get("en", f"CategoryID {category_id}")
         
-        new_items.append({
+        item_info = {
             "name": item_name,
             "description": item_description,
             "type_id": type_id,
@@ -676,7 +680,50 @@ def analyze_new_items(added_types, groups_data, categories_data):
             "category_id": category_id,
             "group_name": group_name,
             "category_name": category_name
-        })
+        }
+        
+        # 只对指定类别的物品收集属性信息
+        if category_id in target_categories:
+            # 优先从 added_typedogma 获取，如果没有则从完整的 typedogma_data 获取
+            item_typedogma = added_typedogma.get(type_id)
+            if item_typedogma is None and typedogma_data:
+                item_typedogma = typedogma_data.get(type_id, {})
+            
+            if item_typedogma:
+                attributes = []
+                dogma_attributes = item_typedogma.get("dogmaAttributes", [])
+                
+                for attr in dogma_attributes:
+                    attribute_id = attr.get("attributeID")
+                    attribute_value = attr.get("value", 0)
+                    
+                    # 跳过值为 0 的属性（通常表示未设置）
+                    if attribute_value == 0:
+                        continue
+                    
+                    # 获取属性名称
+                    attribute_name = get_attribute_name(attribute_id, dogma_attributes_data)
+                    
+                    # 格式化数值显示
+                    if isinstance(attribute_value, float) and attribute_value.is_integer():
+                        attribute_value = int(attribute_value)
+                    
+                    attributes.append({
+                        "attributeID": attribute_id,
+                        "attributeName": attribute_name,
+                        "value": attribute_value
+                    })
+                
+                # 按属性名称排序
+                attributes.sort(key=lambda x: x["attributeName"])
+                item_info["attributes"] = attributes
+            else:
+                item_info["attributes"] = []
+        else:
+            # 非目标类别，不收集属性
+            item_info["attributes"] = None
+        
+        new_items.append(item_info)
     
     return new_items
 
@@ -751,10 +798,20 @@ def main():
     added_blueprints, removed_blueprints, changed_blueprints = load_blueprints_delta("delta")
     print(f"找到 {len(added_blueprints)} 个新增蓝图, {len(removed_blueprints)} 个移除蓝图, {len(changed_blueprints)} 个变更蓝图")
     
-    # 加载 typeDogma delta 文件（只关注 changed）
+    # 加载 typeDogma delta 文件（关注 changed 和 added）
     print("加载 typeDogma delta 文件...")
-    changed_typedogma = load_typedogma_delta("delta")
-    print(f"找到 {len(changed_typedogma)} 个属性变更的物品")
+    changed_typedogma, added_typedogma = load_typedogma_delta("delta")
+    print(f"找到 {len(changed_typedogma)} 个属性变更的物品, {len(added_typedogma)} 个新增物品的属性")
+    
+    # 加载 SISI typeDogma 数据（用于获取新增物品的完整属性信息）
+    sisi_typedogma_file = "sisi-jsonl/typeDogma.jsonl"
+    sisi_typedogma_data = {}
+    if os.path.exists(sisi_typedogma_file):
+        print("加载 SISI typeDogma 数据...")
+        sisi_typedogma_data = load_jsonl(sisi_typedogma_file)
+        print(f"加载了 {len(sisi_typedogma_data)} 个 SISI typeDogma")
+    else:
+        print(f"警告: 未找到 SISI typeDogma 文件 {sisi_typedogma_file}，新增物品属性收集可能受限")
     
     # 分析物品属性变化（只关注指定类别的物品）
     target_categories = {4, 6, 7, 18, 20, 65, 66, 87}
@@ -844,8 +901,11 @@ def main():
                         f.write(f"- {material['name']}（{material['quantity']}数量）\n")
                 f.write("\n")
     
-    # 创建新增物品分析
-    all_new_items = analyze_new_items(added_types, sisi_groups_data, sisi_categories_data)
+    # 创建新增物品分析（包含属性信息）
+    all_new_items = analyze_new_items(
+        added_types, sisi_groups_data, sisi_categories_data,
+        added_typedogma, sisi_typedogma_data, sisi_dogma_attributes_data, target_categories
+    )
     
     # 创建 whats_new.md 文件
     with open("summary/whats_new.md", "w", encoding="utf-8") as f:
@@ -889,11 +949,23 @@ def main():
                     # 输出该组别的所有物品
                     for item in group_items:
                         description = item.get('description', '')
+                        attributes = item.get('attributes')
+                        
                         if description:
                             f.write(f"- **{item['name']}**\n")
                             f.write(f"  - {description}\n")
                         else:
-                            f.write(f"- {item['name']}\n")
+                            f.write(f"- **{item['name']}**\n")
+                        
+                        # 如果是目标类别且有属性信息，显示属性
+                        if attributes is not None and attributes:
+                            f.write(f"  - 属性:\n")
+                            for attr in attributes:
+                                attr_name = attr.get('attributeName', f"AttributeID {attr.get('attributeID')}")
+                                attr_value = attr.get('value', 0)
+                                f.write(f"    - {attr_name}: {attr_value}\n")
+                        
+                        f.write("\n")
                     f.write("\n")
         
         f.write("# 新增飞船\n\n")
