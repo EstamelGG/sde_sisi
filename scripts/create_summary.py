@@ -7,6 +7,7 @@ import json
 import os
 import glob
 import re
+import sys
 from collections import defaultdict
 
 def load_jsonl(filename):
@@ -189,7 +190,7 @@ def load_typedogma_delta(delta_dir):
     """加载 typeDogma.delta.jsonl 文件，提取改动的物品（changed）和新增的物品（added）"""
     changed_typedogma = {}
     added_typedogma = {}
-    
+
     typedogma_delta_file = f"{delta_dir}/typeDogma.delta.jsonl"
     if os.path.exists(typedogma_delta_file):
         print(f"处理 typeDogma delta 文件: {typedogma_delta_file}")
@@ -200,7 +201,7 @@ def load_typedogma_delta(delta_dir):
                     action = record.get("action")
                     type_id = record.get("id")
                     typedogma_data = record.get("data", {})
-                    
+
                     if action == "changed":
                         changed_typedogma[type_id] = typedogma_data
                     elif action == "added":
@@ -632,7 +633,7 @@ def create_blueprint_comparison_markdown(added_blueprints, removed_blueprints, c
     
     return "".join(lines)
 
-def analyze_new_items(added_types, groups_data, categories_data, added_typedogma, 
+def analyze_new_items(added_types, groups_data, categories_data, added_typedogma,
                      typedogma_data, dogma_attributes_data, target_categories):
     """分析所有新增物品，获取类别和组别信息，对指定类别的物品收集属性信息"""
     new_items = []
@@ -659,7 +660,7 @@ def analyze_new_items(added_types, groups_data, categories_data, added_typedogma
         group_name = "未知组别"
         category_name = "未知类别"
         category_id = None
-        
+
         if group_id in groups_data:
             group_data = groups_data[group_id]
             group_name_data = group_data.get("name", {})
@@ -681,39 +682,39 @@ def analyze_new_items(added_types, groups_data, categories_data, added_typedogma
             "group_name": group_name,
             "category_name": category_name
         }
-        
+
         # 只对指定类别的物品收集属性信息
         if category_id in target_categories:
             # 优先从 added_typedogma 获取，如果没有则从完整的 typedogma_data 获取
             item_typedogma = added_typedogma.get(type_id)
             if item_typedogma is None and typedogma_data:
                 item_typedogma = typedogma_data.get(type_id, {})
-            
+
             if item_typedogma:
                 attributes = []
                 dogma_attributes = item_typedogma.get("dogmaAttributes", [])
-                
+
                 for attr in dogma_attributes:
                     attribute_id = attr.get("attributeID")
                     attribute_value = attr.get("value", 0)
-                    
+
                     # 跳过值为 0 的属性（通常表示未设置）
                     if attribute_value == 0:
                         continue
-                    
+
                     # 获取属性名称
                     attribute_name = get_attribute_name(attribute_id, dogma_attributes_data)
-                    
+
                     # 格式化数值显示
                     if isinstance(attribute_value, float) and attribute_value.is_integer():
                         attribute_value = int(attribute_value)
-                    
+
                     attributes.append({
                         "attributeID": attribute_id,
                         "attributeName": attribute_name,
                         "value": attribute_value
                     })
-                
+
                 # 按属性名称排序
                 attributes.sort(key=lambda x: x["attributeName"])
                 item_info["attributes"] = attributes
@@ -722,7 +723,7 @@ def analyze_new_items(added_types, groups_data, categories_data, added_typedogma
         else:
             # 非目标类别，不收集属性
             item_info["attributes"] = None
-        
+
         new_items.append(item_info)
     
     return new_items
@@ -745,7 +746,7 @@ def main():
     for file_path in required_files:
         if not os.path.exists(file_path):
             print(f"错误: 找不到必要文件 {file_path}")
-            return
+            sys.exit(1)
     
     # 加载数据
     print("加载 SISI groups 数据...")
@@ -802,7 +803,7 @@ def main():
     print("加载 typeDogma delta 文件...")
     changed_typedogma, added_typedogma = load_typedogma_delta("delta")
     print(f"找到 {len(changed_typedogma)} 个属性变更的物品, {len(added_typedogma)} 个新增物品的属性")
-    
+
     # 加载 SISI typeDogma 数据（用于获取新增物品的完整属性信息）
     sisi_typedogma_file = "sisi-jsonl/typeDogma.jsonl"
     sisi_typedogma_data = {}
@@ -827,12 +828,13 @@ def main():
         if not tq_typedogma_data:
             print("警告: 未找到 TQ typeDogma 数据，无法进行属性比对")
     
-    if not added_types:
-        print("没有找到新增的 types，跳过分析")
-        return
-    
-    # 分析新增的 types
-    new_ships, category_stats = analyze_new_types(added_types, sisi_groups_data, sisi_types_data)
+    # 分析新增的 types（即使没有新增types，也要继续处理蓝图变更和属性变更）
+    if added_types:
+        new_ships, category_stats = analyze_new_types(added_types, sisi_groups_data, sisi_types_data)
+    else:
+        print("没有找到新增的 types，继续处理其他变更（蓝图变更、属性变更等）")
+        new_ships = {}
+        category_stats = {}
     
     # 查找新飞船的蓝图
     print("\n=== 蓝图分析 ===")
@@ -846,24 +848,25 @@ def main():
     report["blueprint_analysis"] = blueprint_analysis
     
     # 保存新飞船数据
-    os.makedirs("summary", exist_ok=True)
-    with open("summary/new_ships.json", "w", encoding="utf-8") as f:
-        json.dump(new_ships, f, ensure_ascii=False, indent=2)
-    
-    # 保存蓝图分析
-    with open("summary/blueprint_analysis.json", "w", encoding="utf-8") as f:
-        json.dump(blueprint_analysis, f, ensure_ascii=False, indent=2)
-    
-    # 保存完整报告
-    with open("summary/summary_report.json", "w", encoding="utf-8") as f:
-        json.dump(report, f, ensure_ascii=False, indent=2)
-    
-    # 创建 Markdown 报告
-    with open("summary/summary_report.md", "w", encoding="utf-8") as f:
-        f.write("# SDE 变更汇总报告\n\n")
-        f.write(f"## 新增 Types 统计\n")
-        f.write(f"- 总新增 Types: {len(added_types)}\n")
-        f.write(f"- 新增飞船数量: {len(new_ships)}\n\n")
+    try:
+        os.makedirs("summary", exist_ok=True)
+        with open("summary/new_ships.json", "w", encoding="utf-8") as f:
+            json.dump(new_ships, f, ensure_ascii=False, indent=2)
+
+        # 保存蓝图分析
+        with open("summary/blueprint_analysis.json", "w", encoding="utf-8") as f:
+            json.dump(blueprint_analysis, f, ensure_ascii=False, indent=2)
+
+        # 保存完整报告
+        with open("summary/summary_report.json", "w", encoding="utf-8") as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
+
+        # 创建 Markdown 报告
+        with open("summary/summary_report.md", "w", encoding="utf-8") as f:
+            f.write("# SDE 变更汇总报告\n\n")
+            f.write(f"## 新增 Types 统计\n")
+            f.write(f"- 总新增 Types: {len(added_types)}\n")
+            f.write(f"- 新增飞船数量: {len(new_ships)}\n\n")
         
         f.write("## 类别分布\n")
         for category_id, count in sorted(category_stats.items()):
@@ -886,21 +889,28 @@ def main():
                 f.write("制造材料:\n")
                 for material in ship_info['materials']:
                     f.write(f"- {material['name']} ({material['quantity']} 数量)\n")
-    
+    except Exception as e:
+        print(f"错误: 写入报告文件失败: {e}")
+        sys.exit(1)
+
     # 创建简化的新飞船材料报告
-    with open("summary/new_ships_materials.txt", "w", encoding="utf-8") as f:
-        if not blueprint_analysis:
-            f.write("本次更新未发现新飞船\n")
-        else:
-            for ship_info in blueprint_analysis:
-                f.write(f"新增飞船：{ship_info['ship_name']}\n")
-                if ship_info['status'] == "未找到蓝图":
-                    f.write("- 未找到蓝图\n")
-                else:
-                    for material in ship_info['materials']:
-                        f.write(f"- {material['name']}（{material['quantity']}数量）\n")
-                f.write("\n")
-    
+    try:
+        with open("summary/new_ships_materials.txt", "w", encoding="utf-8") as f:
+            if not blueprint_analysis:
+                f.write("本次更新未发现新飞船\n")
+            else:
+                for ship_info in blueprint_analysis:
+                    f.write(f"新增飞船：{ship_info['ship_name']}\n")
+                    if ship_info['status'] == "未找到蓝图":
+                        f.write("- 未找到蓝图\n")
+                    else:
+                        for material in ship_info['materials']:
+                            f.write(f"- {material['name']}（{material['quantity']}数量）\n")
+                    f.write("\n")
+    except Exception as e:
+        print(f"错误: 写入 new_ships_materials.txt 文件失败: {e}")
+        sys.exit(1)
+
     # 创建新增物品分析（包含属性信息）
     all_new_items = analyze_new_items(
         added_types, sisi_groups_data, sisi_categories_data,
@@ -908,55 +918,56 @@ def main():
     )
     
     # 创建 whats_new.md 文件
-    with open("summary/whats_new.md", "w", encoding="utf-8") as f:
-        f.write("# 新增物品\n\n")
-        
-        if not all_new_items:
-            f.write("本次更新未发现新增物品。\n\n")
-        else:
-            # 按 categoryID 和 groupID 分组
-            grouped_items = {}
-            for item in all_new_items:
-                category_id = item.get('category_id', 999)  # 未知类别排在最后
-                group_id = item.get('group_id', 999)  # 未知组别排在最后
-                
-                if category_id not in grouped_items:
-                    grouped_items[category_id] = {}
-                if group_id not in grouped_items[category_id]:
-                    grouped_items[category_id][group_id] = []
-                
-                grouped_items[category_id][group_id].append(item)
-            
-            # 按 categoryID 排序并输出
-            for category_id in sorted(grouped_items.keys()):
-                category_items = grouped_items[category_id]
-                
-                # 获取类别名称（从第一个物品中获取）
-                first_item = next(iter(category_items.values()))[0]
-                category_display_name = first_item.get('category_name', '未知类别')
-                
-                f.write(f"## {category_display_name}\n\n")
-                
-                # 按 groupID 排序并输出
-                for group_id in sorted(category_items.keys()):
-                    group_items = category_items[group_id]
-                    
-                    # 获取组别名称
-                    group_display_name = group_items[0].get('group_name', '未知组别')
-                    
-                    f.write(f"### {group_display_name}\n\n")
-                    
-                    # 输出该组别的所有物品
-                    for item in group_items:
-                        description = item.get('description', '')
-                        attributes = item.get('attributes')
-                        
+    try:
+        with open("summary/whats_new.md", "w", encoding="utf-8") as f:
+            f.write("# 新增物品\n\n")
+
+            if not all_new_items:
+                f.write("本次更新未发现新增物品。\n\n")
+            else:
+                # 按 categoryID 和 groupID 分组
+                grouped_items = {}
+                for item in all_new_items:
+                    category_id = item.get('category_id', 999)  # 未知类别排在最后
+                    group_id = item.get('group_id', 999)  # 未知组别排在最后
+
+                    if category_id not in grouped_items:
+                        grouped_items[category_id] = {}
+                    if group_id not in grouped_items[category_id]:
+                        grouped_items[category_id][group_id] = []
+
+                    grouped_items[category_id][group_id].append(item)
+
+                # 按 categoryID 排序并输出
+                for category_id in sorted(grouped_items.keys()):
+                    category_items = grouped_items[category_id]
+
+                    # 获取类别名称（从第一个物品中获取）
+                    first_item = next(iter(category_items.values()))[0]
+                    category_display_name = first_item.get('category_name', '未知类别')
+
+                    f.write(f"## {category_display_name}\n\n")
+
+                    # 按 groupID 排序并输出
+                    for group_id in sorted(category_items.keys()):
+                        group_items = category_items[group_id]
+
+                        # 获取组别名称
+                        group_display_name = group_items[0].get('group_name', '未知组别')
+
+                        f.write(f"### {group_display_name}\n\n")
+
+                        # 输出该组别的所有物品
+                        for item in group_items:
+                            description = item.get('description', '')
+                            attributes = item.get('attributes')
+
                         if description:
                             f.write(f"- **{item['name']}**\n")
                             f.write(f"  - {description}\n")
                         else:
                             f.write(f"- **{item['name']}**\n")
-                        
+
                         # 如果是目标类别且有属性信息，显示属性
                         if attributes is not None and attributes:
                             f.write(f"  - 属性:\n")
@@ -964,39 +975,42 @@ def main():
                                 attr_name = attr.get('attributeName', f"AttributeID {attr.get('attributeID')}")
                                 attr_value = attr.get('value', 0)
                                 f.write(f"    - {attr_name}: {attr_value}\n")
-                        
+
                         f.write("\n")
+                        f.write("\n")
+
+            f.write("# 新增飞船\n\n")
+
+            if not blueprint_analysis:
+                f.write("本次更新未发现新飞船。\n")
+            else:
+                for ship_info in blueprint_analysis:
+                    f.write(f"## {ship_info['ship_name']}\n")
+
+                    if ship_info['status'] == "未找到蓝图":
+                        f.write("- 未找到蓝图\n")
+                    else:
+                        for material in ship_info['materials']:
+                            f.write(f"- {material['name']} × {material['quantity']}\n")
                     f.write("\n")
-        
-        f.write("# 新增飞船\n\n")
-        
-        if not blueprint_analysis:
-            f.write("本次更新未发现新飞船。\n")
-        else:
-            for ship_info in blueprint_analysis:
-                f.write(f"## {ship_info['ship_name']}\n")
-                
-                if ship_info['status'] == "未找到蓝图":
-                    f.write("- 未找到蓝图\n")
-                else:
-                    for material in ship_info['materials']:
-                        f.write(f"- {material['name']} × {material['quantity']}\n")
-                f.write("\n")
-        
-        # 添加蓝图比对部分
-        f.write("\n")
-        blueprint_comparison = create_blueprint_comparison_markdown(
-            added_blueprints, removed_blueprints, changed_blueprints,
-            tq_blueprints_data, sisi_blueprints_data, sisi_types_data
-        )
-        f.write(blueprint_comparison)
-        
-        # 添加物品属性变更部分
-        f.write("\n")
-        attribute_changes = create_attribute_changes_markdown(
-            items_with_attribute_changes, sisi_types_data
-        )
-        f.write(attribute_changes)
+
+            # 添加蓝图比对部分
+            f.write("\n")
+            blueprint_comparison = create_blueprint_comparison_markdown(
+                added_blueprints, removed_blueprints, changed_blueprints,
+                tq_blueprints_data, sisi_blueprints_data, sisi_types_data
+            )
+            f.write(blueprint_comparison)
+
+            # 添加物品属性变更部分
+            f.write("\n")
+            attribute_changes = create_attribute_changes_markdown(
+                items_with_attribute_changes, sisi_types_data
+            )
+            f.write(attribute_changes)
+    except Exception as e:
+        print(f"错误: 写入 whats_new.md 文件失败: {e}")
+        sys.exit(1)
     
     print(f"\n=== 汇总完成 ===")
     print(f"新增 Types 总数: {len(added_types)}")
