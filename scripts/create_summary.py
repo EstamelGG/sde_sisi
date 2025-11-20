@@ -867,28 +867,28 @@ def main():
             f.write(f"## 新增 Types 统计\n")
             f.write(f"- 总新增 Types: {len(added_types)}\n")
             f.write(f"- 新增飞船数量: {len(new_ships)}\n\n")
-        
-        f.write("## 类别分布\n")
-        for category_id, count in sorted(category_stats.items()):
-            f.write(f"- CategoryID {category_id}: {count} 个\n")
-        
-        if new_ships:
-            f.write("\n## 新增飞船列表\n")
-            for type_id, type_data in new_ships.items():
-                group_id = type_data.get("groupID", "未知")
-                name = type_data.get("name", {}).get("en", f"TypeID {type_id}")
-                f.write(f"- {name} (TypeID: {type_id}, GroupID: {group_id})\n")
-        
-        # 添加蓝图分析
-        f.write("\n## 新飞船蓝图分析\n")
-        for ship_info in blueprint_analysis:
-            f.write(f"\n### {ship_info['ship_name']}\n")
-            if ship_info['status'] == "未找到蓝图":
-                f.write("- 未找到蓝图\n")
-            else:
-                f.write("制造材料:\n")
-                for material in ship_info['materials']:
-                    f.write(f"- {material['name']} ({material['quantity']} 数量)\n")
+            
+            f.write("## 类别分布\n")
+            for category_id, count in sorted(category_stats.items()):
+                f.write(f"- CategoryID {category_id}: {count} 个\n")
+            
+            if new_ships:
+                f.write("\n## 新增飞船列表\n")
+                for type_id, type_data in new_ships.items():
+                    group_id = type_data.get("groupID", "未知")
+                    name = type_data.get("name", {}).get("en", f"TypeID {type_id}")
+                    f.write(f"- {name} (TypeID: {type_id}, GroupID: {group_id})\n")
+            
+            # 添加蓝图分析
+            f.write("\n## 新飞船蓝图分析\n")
+            for ship_info in blueprint_analysis:
+                f.write(f"\n### {ship_info['ship_name']}\n")
+                if ship_info['status'] == "未找到蓝图":
+                    f.write("- 未找到蓝图\n")
+                else:
+                    f.write("制造材料:\n")
+                    for material in ship_info['materials']:
+                        f.write(f"- {material['name']} ({material['quantity']} 数量)\n")
     except Exception as e:
         print(f"错误: 写入报告文件失败: {e}")
         sys.exit(1)
@@ -962,22 +962,21 @@ def main():
                             description = item.get('description', '')
                             attributes = item.get('attributes')
 
-                        if description:
-                            f.write(f"- **{item['name']}**\n")
-                            f.write(f"  - {description}\n")
-                        else:
-                            f.write(f"- **{item['name']}**\n")
+                            if description:
+                                f.write(f"- **{item['name']}**\n")
+                                f.write(f"  - {description}\n")
+                            else:
+                                f.write(f"- **{item['name']}**\n")
 
-                        # 如果是目标类别且有属性信息，显示属性
-                        if attributes is not None and attributes:
-                            f.write(f"  - 属性:\n")
-                            for attr in attributes:
-                                attr_name = attr.get('attributeName', f"AttributeID {attr.get('attributeID')}")
-                                attr_value = attr.get('value', 0)
-                                f.write(f"    - {attr_name}: {attr_value}\n")
+                            # 如果是目标类别且有属性信息，显示属性
+                            if attributes is not None and attributes:
+                                f.write(f"  - 属性:\n")
+                                for attr in attributes:
+                                    attr_name = attr.get('attributeName', f"AttributeID {attr.get('attributeID')}")
+                                    attr_value = attr.get('value', 0)
+                                    f.write(f"    - {attr_name}: {attr_value}\n")
 
-                        f.write("\n")
-                        f.write("\n")
+                            f.write("\n")
 
             f.write("# 新增飞船\n\n")
 
