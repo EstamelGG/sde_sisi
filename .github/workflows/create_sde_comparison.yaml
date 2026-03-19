@@ -14,8 +14,8 @@ on:
         required: false
         type: boolean
         default: false
-  schedule:
-  - cron: '0 */1 * * *'
+  # schedule:
+  # - cron: '0 */1 * * *'
 
 concurrency:
   group: ${{ github.workflow }}
